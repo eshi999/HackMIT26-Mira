@@ -31,22 +31,15 @@ from mira.reconciliation.types import ReconciliationReport, ThreeWayMatchResult
 from mira.risk.engine import run_risk_engine
 from mira.risk.types import RiskEngineResult
 
-_risk_cache: dict[int, RiskEngineResult] = {}
-_recon_cache: dict[int, ReconciliationReport] = {}
-
 
 def _cached_risk(snapshot: FinanceSnapshot) -> RiskEngineResult:
-    key = id(snapshot)
-    if key not in _risk_cache:
-        _risk_cache[key] = run_risk_engine(snapshot)
-    return _risk_cache[key]
+    """Compatibility helper: compute afresh; snapshot object IDs can be reused."""
+    return run_risk_engine(snapshot)
 
 
 def _cached_recon(snapshot: FinanceSnapshot) -> ReconciliationReport:
-    key = id(snapshot)
-    if key not in _recon_cache:
-        _recon_cache[key] = reconcile(snapshot)
-    return _recon_cache[key]
+    """Compatibility helper: compute afresh; snapshot object IDs can be reused."""
+    return reconcile(snapshot)
 
 TOOL_NAMES = (
     "evaluate_invoice",
