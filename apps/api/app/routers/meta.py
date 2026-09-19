@@ -22,7 +22,10 @@ def meta() -> dict:
 
     adapters = [
         StorageAdapter(settings.dropbox_access_token),
-        ElasticAdapter(),
+        ElasticAdapter(
+            settings.elasticsearch_url,
+            api_key=settings.elasticsearch_api_key,
+        ),
         DeepgramAdapter(),
         VisaAdapter(),
         ZenniAdapter(),

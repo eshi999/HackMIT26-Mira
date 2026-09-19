@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     deepgram_api_key: str | None = None
     dropbox_access_token: str | None = None
     elasticsearch_url: str | None = None
+    elasticsearch_api_key: str | None = None
     zenni_skill_token: str | None = None
     visa_sandbox: bool = True
 
