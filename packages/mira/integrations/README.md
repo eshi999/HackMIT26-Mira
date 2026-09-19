@@ -9,4 +9,4 @@ One adapter per third party. Missing credentials → demo mode. The command cent
 | deepgram | typed skill API |
 | visa | `Payment.is_sandbox=true` |
 | zenni | HTTP contract only |
-| public_data | seeded FRED-like snapshots |
+| public_data | seeded FRED/Treasury snapshots | Treasury Fiscal Data API (no key) |

@@ -247,7 +247,7 @@ Seeded in `packages/mira/seed/northstar.py`. Series B lab company, messy AP inbo
 | 0 | Architecture, scorecard, data model | **this PR** |
 | 1 | Monorepo, models, migrations, health, seed, boot tests | **this PR** |
 | 2 | Command center UI on seeded data | **this PR** (shell) |
-| 3 | Deterministic engines: policy, duplicate, 3-way, risk, savings | next |
+| 3 | Deterministic engines: policy, duplicate, 3-way, risk, savings, recon, contracts, public data, Elastic projection | **this PR (phase 2)** |
 | 4 | Mira runtime + specialist agents (OpenAI Agents SDK) | next — **do not start here** |
 | 5 | Procurement path (Visa sandbox) | next |
 | 6 | Dropbox ingest + textual analysis | next |
