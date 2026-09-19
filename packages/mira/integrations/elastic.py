@@ -6,6 +6,8 @@ from collections.abc import Iterable
 from typing import Any
 from uuid import UUID
 
+import httpx
+
 from mira.evidence.index_docs import (
     ALL_INDICES,
     INDEX_CONTRACTS,
@@ -25,43 +27,258 @@ from mira.integrations.base import AdapterStatus
 from mira.risk.types import FinancialIncident, TypedFinding
 
 
+class ElasticIntegrationError(RuntimeError):
+    """Raised when live Elasticsearch cannot satisfy a request."""
+
+
 class ElasticAdapter:
     name = "elastic"
 
-    def __init__(self, url: str | None = None) -> None:
-        self.url = url
-        self._store: dict[str, dict[str, IndexDocument]] = {name: {} for name in ALL_INDICES}
+    def __init__(
+        self,
+        url: str | None = None,
+        *,
+        api_key: str | None = None,
+        timeout: float = 10.0,
+    ) -> None:
+        self.url = url.rstrip("/") if url else None
+        self.api_key = api_key
+        self.timeout = timeout
+
+        # Demo fallback. SQL remains canonical truth and this in-memory
+        # representation keeps Mira usable without Elasticsearch.
+        self._store: dict[str, dict[str, IndexDocument]] = {
+            name: {} for name in ALL_INDICES
+        }
+
+        # Avoid checking index existence before every document write.
+        self._ensured_indices: set[str] = set()
 
     def status(self) -> AdapterStatus:
         return AdapterStatus.LIVE if self.url else AdapterStatus.DEMO
 
+    def health_check(self) -> AdapterStatus:
+        """Check whether configured Elasticsearch is actually reachable."""
+
+        if not self.url:
+            return AdapterStatus.DEMO
+
+        try:
+            self._request("GET", "/_cluster/health")
+        except ElasticIntegrationError:
+            return AdapterStatus.UNAVAILABLE
+
+        return AdapterStatus.LIVE
+
     def mappings(self) -> dict[str, Any]:
         return INDEX_MAPPINGS
 
+    def ensure_indices(self) -> None:
+        """Create Mira indices with their canonical mappings when needed."""
+
+        if not self.url:
+            return
+
+        for name in ALL_INDICES:
+            self._ensure_index(name)
+
     def index(self, document: IndexDocument) -> None:
-        self._store.setdefault(document.index, {})[document.doc_id] = document
+        """Index one document into live Elastic or the demo memory store."""
+
+        if not self.url:
+            self._store.setdefault(document.index, {})[document.doc_id] = document
+            return
+
+        self._ensure_index(document.index)
+
+        self._request(
+            "PUT",
+            f"/{document.index}/_doc/{document.doc_id}",
+            json_body=document.body,
+            params={"refresh": "true"},
+        )
 
     def bulk_index(self, documents: Iterable[IndexDocument]) -> int:
         count = 0
+
         for document in documents:
             self.index(document)
             count += 1
+
         return count
 
     def get(self, index: str, source_id: UUID) -> IndexDocument | None:
-        return self._store.get(index, {}).get(str(source_id))
+        """Retrieve a canonical search document by source UUID."""
 
-    def search(self, query: str, *, index: str | None = None) -> tuple[IndexDocument, ...]:
-        """SQL-shaped fallback: substring match over title/body while preserving source_id."""
-        needle = query.lower()
-        hits: list[IndexDocument] = []
-        indices = [index] if index else list(self._store)
-        for name in indices:
-            for document in self._store.get(name, {}).values():
-                blob = f"{document.body.get('title', '')} {document.body.get('body', '')} {document.source_id}"
-                if needle in blob.lower():
-                    hits.append(document)
-        return tuple(hits)
+        if not self.url:
+            return self._store.get(index, {}).get(str(source_id))
+
+        result = self._request(
+            "GET",
+            f"/{index}/_doc/{source_id}",
+            allow_404=True,
+        )
+
+        if result is None:
+            return None
+
+        return self._document_from_hit(
+            {
+                "_index": result["_index"],
+                "_id": result["_id"],
+                "_source": result["_source"],
+            }
+        )
+
+    def search(
+        self,
+        query: str,
+        *,
+        index: str | None = None,
+    ) -> tuple[IndexDocument, ...]:
+        """Search canonical Mira documents while preserving source IDs."""
+
+        if not self.url:
+            needle = query.lower()
+            hits: list[IndexDocument] = []
+            indices = [index] if index else list(self._store)
+
+            for name in indices:
+                for document in self._store.get(name, {}).values():
+                    blob = (
+                        f"{document.body.get('title', '')} "
+                        f"{document.body.get('body', '')} "
+                        f"{document.source_id}"
+                    )
+
+                    if needle in blob.lower():
+                        hits.append(document)
+
+            return tuple(hits)
+
+        if index:
+            search_path = f"/{index}/_search"
+        else:
+            search_path = f"/{','.join(ALL_INDICES)}/_search"
+
+        result = self._request(
+            "POST",
+            search_path,
+            json_body={
+                "size": 50,
+                "query": {
+                    "multi_match": {
+                        "query": query,
+                        "fields": [
+                            "title^2",
+                            "body",
+                            "source_id",
+                            "source_type",
+                        ],
+                    }
+                },
+            },
+            params={"ignore_unavailable": "true"},
+        )
+
+        if result is None:
+            return ()
+
+        raw_hits = result.get("hits", {}).get("hits", [])
+
+        return tuple(
+            self._document_from_hit(hit)
+            for hit in raw_hits
+            if isinstance(hit, dict) and "_source" in hit
+        )
+
+    def _headers(self) -> dict[str, str]:
+        headers = {
+            "Content-Type": "application/json",
+        }
+
+        if self.api_key:
+            headers["Authorization"] = f"ApiKey {self.api_key}"
+
+        return headers
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json_body: dict[str, Any] | None = None,
+        params: dict[str, str] | None = None,
+        allow_404: bool = False,
+    ) -> dict[str, Any] | None:
+        if not self.url:
+            raise ElasticIntegrationError(
+                "Elasticsearch credentials are not configured."
+            )
+
+        try:
+            response = httpx.request(
+                method,
+                f"{self.url}{path}",
+                headers=self._headers(),
+                json=json_body,
+                params=params,
+                timeout=self.timeout,
+            )
+
+            if allow_404 and response.status_code == 404:
+                return None
+
+            response.raise_for_status()
+            result = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            raise ElasticIntegrationError(
+                f"Elasticsearch request failed: {method} {path}"
+            ) from exc
+
+        if not isinstance(result, dict):
+            raise ElasticIntegrationError(
+                "Elasticsearch returned an unexpected response."
+            )
+
+        return result
+
+    def _ensure_index(self, index: str) -> None:
+        if index in self._ensured_indices:
+            return
+
+        if index not in INDEX_MAPPINGS:
+            raise ElasticIntegrationError(
+                f"Unknown Mira Elasticsearch index: {index}"
+            )
+
+        existing = self._request(
+            "GET",
+            f"/{index}",
+            allow_404=True,
+        )
+
+        if existing is None:
+            self._request(
+                "PUT",
+                f"/{index}",
+                json_body=INDEX_MAPPINGS[index],
+            )
+
+        self._ensured_indices.add(index)
+
+    @staticmethod
+    def _document_from_hit(hit: dict[str, Any]) -> IndexDocument:
+        source = hit["_source"]
+
+        return IndexDocument(
+            index=hit["_index"],
+            doc_id=hit["_id"],
+            source_id=UUID(str(source["source_id"])),
+            source_type=str(source["source_type"]),
+            company_id=UUID(str(source["company_id"])),
+            body=source,
+        )
 
     def project_snapshot(
         self,
