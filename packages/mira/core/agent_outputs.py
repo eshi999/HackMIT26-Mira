@@ -4,7 +4,7 @@ Agents MUST NOT communicate through unstructured prose alone.
 These schemas are the only legal payloads on AgentTask.result_payload
 and Decision.structured_output.
 
-No agent runtime lives in this slice — only the contract.
+Financial arithmetic, risk, policy, and reconciliation never originate here.
 """
 
 from __future__ import annotations
@@ -181,3 +181,97 @@ class ProcurementProposal(BaseModel):
     confidence: Confidence
     risk_level: RiskLevel
     authority_basis: AuthorityBasis
+
+
+class ToolCallRecord(BaseModel):
+    """Persisted record of a deterministic tool invocation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tool: str
+    input: dict[str, Any] = Field(default_factory=dict)
+    output_type: str
+    output: dict[str, Any] = Field(default_factory=dict)
+
+
+class AuditorVerdict(BaseModel):
+    """Adversarial review of another specialist's proposed action."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    accepted: bool
+    rejected: bool
+    proposed_action: str
+    verdict: Literal["accept", "reject", "block"]
+    reasons: list[str] = Field(default_factory=list)
+    policy_violations: list[str] = Field(default_factory=list)
+    missing_evidence: list[str] = Field(default_factory=list)
+    conflicting_evidence: list[str] = Field(default_factory=list)
+    risk_level: RiskLevel
+    confidence: Confidence
+    evidence: list[EvidenceReference] = Field(default_factory=list)
+    explanation: str
+
+
+class AuthorityDecision(BaseModel):
+    """HITL gate. Built from engine confidence/risk, never from free text."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    disposition: str
+    auto_complete: bool
+    requires_human_approval: bool
+    blocks_action: bool
+    is_sandbox: bool
+    reason: str
+    confidence: Confidence
+    risk_level: RiskLevel
+
+
+class ScenarioCase(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    cash_start: Money
+    cash_end_13w: Money
+    weekly: list[dict[str, Any]] = Field(default_factory=list)
+    assumptions: list[str] = Field(default_factory=list)
+    explanation: str
+
+
+class ScenarioAnalysis(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    question: str
+    base_case: ScenarioCase
+    delayed_receivable_case: ScenarioCase
+    recommendation: str
+    confidence: Confidence
+    evidence: list[EvidenceReference] = Field(default_factory=list)
+    assumptions: list[str] = Field(default_factory=list)
+
+
+class CloseTaskStatus(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    key: str
+    title: str
+    specialist: AgentRole
+    status: AgentTaskStatus
+    depends_on: list[str] = Field(default_factory=list)
+    evidence_ids: list[UUID] = Field(default_factory=list)
+    blocker: str | None = None
+    explanation: str = ""
+
+
+class CloseWorkflowStatus(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    period: str
+    completion_pct: Decimal
+    completed: list[str] = Field(default_factory=list)
+    blocked: list[str] = Field(default_factory=list)
+    outstanding_human_decisions: list[UUID] = Field(default_factory=list)
+    audit_status: str
+    tasks: list[CloseTaskStatus] = Field(default_factory=list)
+    run_id: UUID | None = None

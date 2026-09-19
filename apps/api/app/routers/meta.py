@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from mira.agents.openai_runtime import HAS_OPENAI_AGENTS, openai_configured
 from mira.agents.protocol import MIRA_ORG
 from mira.integrations.deepgram import DeepgramAdapter
 from mira.integrations.dropbox import StorageAdapter
@@ -26,7 +27,9 @@ def meta() -> dict:
     return {
         "product": "Mira",
         "thesis": "Autonomous digital CFO — one employee, not a chatbot.",
-        "agents_implemented": False,
+        "agents_implemented": True,
+        "openai_agents_sdk": HAS_OPENAI_AGENTS,
+        "openai_configured": openai_configured(),
         "org": [
             {
                 "role": spec.role.value,

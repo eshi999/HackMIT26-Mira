@@ -42,11 +42,11 @@ def test_briefing_is_not_a_chatbot(client) -> None:
     assert "sandbox" in body["sandbox_notice"].lower()
 
 
-def test_meta_declares_agents_not_implemented(client) -> None:
+def test_meta_declares_mira_runtime(client) -> None:
     response = client.get("/api/v1/meta")
     assert response.status_code == 200
     body = response.json()
-    assert body["agents_implemented"] is False
+    assert body["agents_implemented"] is True
     mira = next(m for m in body["org"] if m["role"] == "mira_cfo")
     assert mira["speaks_to_user"] is True
     specialists = [m for m in body["org"] if m["role"] != "mira_cfo"]

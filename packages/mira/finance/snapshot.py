@@ -20,10 +20,14 @@ from mira.core.models import (
     Document,
     Employee,
     Evidence,
+    FactualMemory,
+    Forecast,
     GoodsReceipt,
     GoodsReceiptLine,
+    HistoricalMemory,
     Invoice,
     InvoiceLine,
+    Metric,
     Payment,
     Policy,
     Precedent,
@@ -229,6 +233,60 @@ class PrecedentView(BaseModel):
     outcome: str
     reusable_rule: str | None = None
     period: str
+    scope: str = "spend"
+    conditions: dict = Field(default_factory=dict)
+    authorizer: str | None = None
+    status: str = "active"
+
+
+class FactualMemoryView(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    subject_type: str
+    subject_id: UUID | None = None
+    fact_key: str
+    statement: str
+    fact_value: dict = Field(default_factory=dict)
+    status: str = "active"
+
+
+class HistoricalMemoryView(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    subject_type: str
+    subject_id: UUID | None = None
+    metric_name: str
+    low: Decimal | None = None
+    high: Decimal | None = None
+    typical: Decimal | None = None
+    unit: str = "usd"
+    statement: str
+    period_start: str
+    period_end: str
+    status: str = "active"
+
+
+class MetricView(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    period: str
+    value: Decimal
+    unit: str
+    source: str
+
+
+class ForecastView(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    metric_name: str
+    period: str
+    method: str
+    value: Decimal
+    lower: Decimal | None = None
+    upper: Decimal | None = None
 
 
 class EvidenceView(BaseModel):
@@ -276,6 +334,7 @@ class SavingsView(BaseModel):
     hours_saved: Decimal
     workflow: str
     period: str
+    source: str = "seed"
 
 
 class FinanceSnapshot(BaseModel):
@@ -299,10 +358,14 @@ class FinanceSnapshot(BaseModel):
     approvals: tuple[ApprovalView, ...] = ()
     subscriptions: tuple[SubscriptionView, ...] = ()
     precedents: tuple[PrecedentView, ...] = ()
+    factual_memories: tuple[FactualMemoryView, ...] = ()
+    historical_memories: tuple[HistoricalMemoryView, ...] = ()
     evidence: tuple[EvidenceView, ...] = ()
     documents: tuple[DocumentView, ...] = ()
     decisions: tuple[DecisionView, ...] = ()
     savings: tuple[SavingsView, ...] = ()
+    metrics: tuple[MetricView, ...] = ()
+    forecasts: tuple[ForecastView, ...] = ()
 
     def vendor(self, vendor_id: UUID | None) -> VendorView | None:
         if vendor_id is None:
@@ -337,6 +400,12 @@ class FinanceSnapshot(BaseModel):
     def bank_transactions(self) -> tuple[TransactionView, ...]:
         return tuple(row for row in self.transactions if row.source == "bank")
 
+    def metric(self, name: str) -> MetricView | None:
+        return next((row for row in self.metrics if row.name == name), None)
+
+    def active_precedents(self) -> tuple[PrecedentView, ...]:
+        return tuple(row for row in self.precedents if row.status == "active")
+
     def merged_rules(self) -> dict:
         merged: dict = {}
         for policy in self.active_policies():
@@ -362,10 +431,14 @@ def load_snapshot(session: Session, company_id: UUID, as_of: date) -> FinanceSna
     approvals = session.query(Approval).filter(Approval.company_id == company_id).all()
     subs = session.query(RecurringSubscription).filter(RecurringSubscription.company_id == company_id).all()
     precedents = session.query(Precedent).filter(Precedent.company_id == company_id).all()
+    facts = session.query(FactualMemory).filter(FactualMemory.company_id == company_id).all()
+    history = session.query(HistoricalMemory).filter(HistoricalMemory.company_id == company_id).all()
     evidence = session.query(Evidence).filter(Evidence.company_id == company_id).all()
     documents = session.query(Document).filter(Document.company_id == company_id).all()
     decisions = session.query(Decision).filter(Decision.company_id == company_id).all()
     savings = session.query(SavingsEvent).filter(SavingsEvent.company_id == company_id).all()
+    metrics = session.query(Metric).filter(Metric.company_id == company_id).all()
+    forecasts = session.query(Forecast).filter(Forecast.company_id == company_id).all()
 
     lines_by_invoice: dict[UUID, list[LineView]] = {}
     for line in invoice_lines:
@@ -580,8 +653,41 @@ def load_snapshot(session: Session, company_id: UUID, as_of: date) -> FinanceSna
                 outcome=row.outcome,
                 reusable_rule=row.reusable_rule,
                 period=row.period,
+                scope=getattr(row, "scope", None) or "spend",
+                conditions=row.conditions or {},
+                authorizer=row.authorizer,
+                status=getattr(row, "status", None) or "active",
             )
             for row in precedents
+        ),
+        factual_memories=tuple(
+            FactualMemoryView(
+                id=row.id,
+                subject_type=row.subject_type,
+                subject_id=row.subject_id,
+                fact_key=row.fact_key,
+                statement=row.statement,
+                fact_value=row.fact_value or {},
+                status=row.status,
+            )
+            for row in facts
+        ),
+        historical_memories=tuple(
+            HistoricalMemoryView(
+                id=row.id,
+                subject_type=row.subject_type,
+                subject_id=row.subject_id,
+                metric_name=row.metric_name,
+                low=row.low,
+                high=row.high,
+                typical=row.typical,
+                unit=row.unit,
+                statement=row.statement,
+                period_start=row.period_start,
+                period_end=row.period_end,
+                status=row.status,
+            )
+            for row in history
         ),
         evidence=tuple(
             EvidenceView(
@@ -627,7 +733,29 @@ def load_snapshot(session: Session, company_id: UUID, as_of: date) -> FinanceSna
                 hours_saved=row.hours_saved,
                 workflow=row.workflow,
                 period=row.period,
+                source=getattr(row, "source", None) or "seed",
             )
             for row in savings
+        ),
+        metrics=tuple(
+            MetricView(
+                name=row.name,
+                period=row.period,
+                value=row.value,
+                unit=row.unit,
+                source=row.source,
+            )
+            for row in metrics
+        ),
+        forecasts=tuple(
+            ForecastView(
+                metric_name=row.metric_name,
+                period=row.period,
+                method=row.method,
+                value=row.value,
+                lower=row.lower,
+                upper=row.upper,
+            )
+            for row in forecasts
         ),
     )

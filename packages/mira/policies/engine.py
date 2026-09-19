@@ -55,22 +55,43 @@ def evaluate_subject(snapshot: FinanceSnapshot, subject: PolicySubject) -> Polic
     aws_carveout = False
     if _aws_vendor(subject.vendor_name) and subject.amount < aws_precedent_limit:
         precedent = next(
-            (row for row in snapshot.precedents if "aws" in (row.reusable_rule or "").lower() or "aws" in row.summary.lower()),
+            (
+                row
+                for row in snapshot.precedents
+                if getattr(row, "status", "active") == "active"
+                and (
+                    "aws" in (row.reusable_rule or "").lower()
+                    or "aws" in row.summary.lower()
+                    or "aws" in (getattr(row, "scope", None) or "").lower()
+                )
+            ),
             None,
         )
-        aws_carveout = True
-        used_precedents.append(precedent.id) if precedent is not None else None
-        checks.append(
-            PolicyCheckResult(
-                policy_id=POL_PREC_AWS_12K,
-                passed=True,
-                reason=(
-                    f"AWS infrastructure {subject.amount} is below the {aws_precedent_limit} "
-                    "precedent ceiling; dual-approval spend rule is not applied."
-                ),
-                used_precedent_id=precedent.id if precedent is not None else None,
+        if precedent is not None:
+            aws_carveout = True
+            used_precedents.append(precedent.id)
+            checks.append(
+                PolicyCheckResult(
+                    policy_id=POL_PREC_AWS_12K,
+                    passed=True,
+                    reason=(
+                        f"AWS infrastructure {subject.amount} is below the {aws_precedent_limit} "
+                        "precedent ceiling; dual-approval spend rule is not applied."
+                    ),
+                    used_precedent_id=precedent.id,
+                )
             )
-        )
+        else:
+            checks.append(
+                PolicyCheckResult(
+                    policy_id=POL_PREC_AWS_12K,
+                    passed=True,
+                    reason=(
+                        "No active AWS infrastructure precedent exists; "
+                        "the spend-threshold rule still applies."
+                    ),
+                )
+            )
     else:
         checks.append(
             PolicyCheckResult(

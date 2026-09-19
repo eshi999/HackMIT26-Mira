@@ -1,4 +1,4 @@
-.PHONY: install test typecheck api web seed migrate lint
+.PHONY: install test typecheck api web seed migrate lint eval
 
 PYTHON ?= .venv/bin/python
 PIP ?= .venv/bin/pip
@@ -33,3 +33,6 @@ migrate:
 
 lint:
 	$(PYTHON) -m ruff check packages apps/api
+
+eval:
+	PYTHONPATH=packages $(PYTHON) -m mira.evaluation

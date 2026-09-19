@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from mira.core.models.agents import AgentRun, AgentTask
+from mira.core.models.agents import AgentRun, AgentTask, OfficeEvent
 from mira.core.models.audit import AuditEvent
 from mira.core.models.base import Base
 from mira.core.models.control import (
@@ -18,7 +18,9 @@ from mira.core.models.control import (
 from mira.core.models.documents import Contract, Document, Policy
 from mira.core.models.intel import (
     ExternalSignal,
+    FactualMemory,
     Forecast,
+    HistoricalMemory,
     Metric,
     Precedent,
     ReconciliationCase,
@@ -66,6 +68,9 @@ CANONICAL_MODELS = (
     Forecast,
     Metric,
     RecurringSubscription,
+    FactualMemory,
+    HistoricalMemory,
+    OfficeEvent,
 )
 
 __all__ = [
@@ -97,7 +102,10 @@ __all__ = [
     "Decision",
     "AgentTask",
     "AgentRun",
+    "OfficeEvent",
     "Precedent",
+    "FactualMemory",
+    "HistoricalMemory",
     "Forecast",
     "Metric",
     "Budget",

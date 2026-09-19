@@ -239,6 +239,49 @@ class AgentTaskStatus(StrEnum):
     FAILED = "failed"
     CANCELLED = "cancelled"
     BLOCKED = "blocked"
+    AWAITING_HUMAN = "awaiting_human"
+
+
+class PrecedentStatus(StrEnum):
+    ACTIVE = "active"
+    REVOKED = "revoked"
+
+
+class MemoryStatus(StrEnum):
+    ACTIVE = "active"
+    SUPERSEDED = "superseded"
+    REVOKED = "revoked"
+
+
+class OfficeEventType(StrEnum):
+    INVOICE_RECEIVED = "invoice_received"
+    BANK_FEED_UPDATED = "bank_feed_updated"
+    PAYMENT_RECEIVED = "payment_received"
+    PURCHASE_REQUESTED = "purchase_requested"
+    MONTH_END_STARTED = "month_end_started"
+    CLOSE_DEADLINE_APPROACHING = "close_deadline_approaching"
+    DOCUMENT_INGESTED = "document_ingested"
+    HUMAN_FEEDBACK_RECEIVED = "human_feedback_received"
+
+
+class OfficeEventStatus(StrEnum):
+    RECEIVED = "received"
+    PLANNED = "planned"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    AWAITING_HUMAN = "awaiting_human"
+    FAILED = "failed"
+
+
+class AuthorityDisposition(StrEnum):
+    AUTO_COMPLETE = "auto_complete"
+    ESCALATE = "escalate"
+    BLOCK = "block"
+
+
+class SavingsSource(StrEnum):
+    SEED = "seed"
+    RUNTIME = "runtime"
 
 
 class ReconciliationStatus(StrEnum):

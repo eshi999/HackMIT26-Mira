@@ -19,7 +19,7 @@ Legend: **Foundation** = shipped in this PR · **Planned** = designed, not yet i
 4. Audit trail: every write is an `AuditEvent`; a decision packet lists evidence.
 5. A low-confidence GPU purchase stops for Elena Voss.
 
-**This PR:** Canonical `AgentRun` / `AgentTask` / `Decision` / `Approval` / `Precedent` / `AuditEvent` models, typed I/O schemas, Northstar seed with one awaiting-human decision. **No agent runtime yet.**
+**This PR:** Canonical `AgentRun` / `AgentTask` / `Decision` / `Approval` / `Precedent` / `AuditEvent` models, typed I/O schemas, Northstar seed with one awaiting-human decision. **Phase 3:** Mira runtime, specialist agents, typed handoffs, memory/precedent, month-end DAG, HITL, executive request API.
 
 **Demo-critical:** Yes, after slice 4.
 
@@ -192,7 +192,7 @@ Legend: **Foundation** = shipped in this PR · **Planned** = designed, not yet i
 2. Tool calls visible: `detect_duplicates`, `score_risk`, `evaluate_policy` — not "write me a memo".
 3. A forced failure: if confidence < threshold, Mira uses `HumanEscalation` instead of acting.
 
-**This PR:** Typed outputs + `AgentRole` + protocol module. **STOP — no SDK runtime.**
+**This PR:** Typed outputs + `AgentRole` + protocol module + **OpenAI Agents SDK org in `mira.agents.openai_runtime`**. Tools wrap Phase 2 engines. Deterministic executor in `mira.agents.runtime` is what tests run. See `docs/SPONSOR_OPENAI.md`.
 
 **Assumptions requiring sponsor docs:**
 - Allowed models, rate limits, and whether Agents SDK (vs Responses + tools) is the required surface.
@@ -288,7 +288,7 @@ Never sacrifice the core demo to add another integration.
 | Dropbox | yes | inbox files | evidence list | — | — | stub |
 | Elastic | yes | evidence rows | page shell | **index docs + source_id** | — | demo projection |
 | Arrowstreet | yes | policy/contract | — | **contract facts vs invoice** | — | — |
-| OpenAI | schemas | — | office graph | engines ready as tools | STOP | — |
+| OpenAI | schemas | — | office graph | engines as tools | **runtime + SDK org** | SDK when key present |
 | Deepgram | stub | — | — | — | — | stub |
 | Cognition | packages | — | — | **engines tested** | — | n/a |
 | Cursor | this repo | yes | yes | **this phase** | — | n/a |

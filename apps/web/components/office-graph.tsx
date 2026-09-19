@@ -34,11 +34,12 @@ const engineStyle = {
 
 const nodes: Node[] = [
   { id: "mira", position: { x: 320, y: 40 }, data: { label: "Mira · Digital CFO" }, style: miraStyle },
-  { id: "ap", position: { x: 40, y: 220 }, data: { label: "AP specialist" }, style: roleStyle },
+  { id: "ap", position: { x: 40, y: 220 }, data: { label: "AP / AR specialist" }, style: roleStyle },
   { id: "proc", position: { x: 220, y: 220 }, data: { label: "Procurement" }, style: roleStyle },
   { id: "treas", position: { x: 400, y: 220 }, data: { label: "Treasury" }, style: roleStyle },
-  { id: "audit", position: { x: 580, y: 220 }, data: { label: "Audit / policy" }, style: roleStyle },
-  { id: "fpna", position: { x: 310, y: 360 }, data: { label: "FP&A" }, style: roleStyle },
+  { id: "ctrl", position: { x: 40, y: 340 }, data: { label: "Controller" }, style: roleStyle },
+  { id: "audit", position: { x: 580, y: 220 }, data: { label: "Auditor" }, style: roleStyle },
+  { id: "fpna", position: { x: 310, y: 360 }, data: { label: "FP&A / Board" }, style: roleStyle },
   {
     id: "engines",
     position: { x: 250, y: 500 },
@@ -52,11 +53,13 @@ const edges: Edge[] = [
   { id: "e2", source: "mira", target: "proc", animated: true },
   { id: "e3", source: "mira", target: "treas", animated: true },
   { id: "e4", source: "mira", target: "audit", animated: true },
+  { id: "e11", source: "mira", target: "ctrl", animated: true },
   { id: "e5", source: "mira", target: "fpna" },
   { id: "e6", source: "ap", target: "engines" },
   { id: "e7", source: "proc", target: "engines" },
   { id: "e8", source: "treas", target: "engines" },
   { id: "e9", source: "audit", target: "engines" },
+  { id: "e12", source: "ctrl", target: "engines" },
   { id: "e10", source: "fpna", target: "engines" },
 ];
 

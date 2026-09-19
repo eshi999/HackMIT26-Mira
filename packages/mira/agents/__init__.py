@@ -1,9 +1,11 @@
-"""Agent runtime — NOT IMPLEMENTED in this slice.
+"""Agent runtime: Mira + specialists calling deterministic tools."""
 
-Contracts: mira.core.agent_outputs and mira.agents.protocol.
-Do not add LLM loops until finance/risk/policy engines exist.
-"""
+from mira.agents.protocol import MIRA_ORG, Agent, SpecialistSpec
+from mira.agents.tools import TOOL_NAMES
 
-from mira.agents.protocol import Agent, SpecialistSpec
-
-__all__ = ["Agent", "SpecialistSpec"]
+__all__ = [
+    "Agent",
+    "SpecialistSpec",
+    "MIRA_ORG",
+    "TOOL_NAMES",
+]
