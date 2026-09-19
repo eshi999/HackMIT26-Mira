@@ -22,6 +22,7 @@ from mira.core.models.intel import (
     Metric,
     Precedent,
     ReconciliationCase,
+    RecurringSubscription,
     SavingsEvent,
 )
 from mira.core.models.ledger import Account, LedgerEntry, Transaction
@@ -64,6 +65,7 @@ CANONICAL_MODELS = (
     Precedent,
     Forecast,
     Metric,
+    RecurringSubscription,
 )
 
 __all__ = [
@@ -104,6 +106,7 @@ __all__ = [
     "SavingsEvent",
     "ExternalSignal",
     "ReconciliationCase",
+    "RecurringSubscription",
     "Document",
     "AuditEvent",
 ]

@@ -279,16 +279,16 @@ Never sacrifice the core demo to add another integration.
 
 | Sponsor | Models / docs | Seed | UI | Engine | Agent | Live adapter |
 | --- | --- | --- | --- | --- | --- | --- |
-| Maximor | yes | partial | shell | — | — | — |
-| Long Lake | yes | yes | briefing | — | — | — |
+| Maximor | yes | partial | shell | **risk/policy/recon** | — | — |
+| Long Lake | yes | yes | briefing | **duplicate + savings math** | — | — |
 | ASUS / Zenni | contract | — | — | — | — | stub |
-| Visa | yes | PO/approval | card | — | — | stub |
-| Voloridge | yes | signals | rail | — | — | stub |
-| Ramp | yes | savings | totals | — | — | n/a |
+| Visa | yes | PO/approval | card | **3-way + policy** | — | stub |
+| Voloridge | yes | signals | rail | **observation≠interpretation** | — | demo + Treasury API |
+| Ramp | yes | savings | totals | **metrics + autonomy score** | — | n/a |
 | Dropbox | yes | inbox files | evidence list | — | — | stub |
-| Elastic | yes | evidence rows | page shell | — | — | stub |
-| Arrowstreet | yes | policy/contract | — | — | — | — |
-| OpenAI | schemas | — | office graph | — | STOP | — |
+| Elastic | yes | evidence rows | page shell | **index docs + source_id** | — | demo projection |
+| Arrowstreet | yes | policy/contract | — | **contract facts vs invoice** | — | — |
+| OpenAI | schemas | — | office graph | engines ready as tools | STOP | — |
 | Deepgram | stub | — | — | — | — | stub |
-| Cognition | packages | — | — | — | — | n/a |
-| Cursor | this repo | yes | yes | — | — | n/a |
+| Cognition | packages | — | — | **engines tested** | — | n/a |
+| Cursor | this repo | yes | yes | **this phase** | — | n/a |

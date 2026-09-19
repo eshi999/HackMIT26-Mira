@@ -124,6 +124,13 @@ class Invoice(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     document_id: Mapped[UUID | None] = mapped_column(ForeignKey("documents.id"), nullable=True)
     is_duplicate_suspect: Mapped[bool] = mapped_column(Boolean, default=False)
+    requested_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    approved_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    posted_period: Mapped[str | None] = mapped_column(String(7), nullable=True)
 
 
 class InvoiceLine(UUIDPrimaryKeyMixin, TimestampMixin, Base):

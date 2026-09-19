@@ -253,3 +253,59 @@ class EvidenceRole(StrEnum):
     CONTRADICTING = "contradicting"
     POLICY_BASIS = "policy_basis"
     AUTHORITY_BASIS = "authority_basis"
+
+
+class FindingType(StrEnum):
+    DUPLICATE_INVOICE = "duplicate_invoice"
+    DUPLICATE_PAYMENT = "duplicate_payment"
+    INVOICE_PO_MISMATCH = "invoice_po_mismatch"
+    INVOICE_GR_MISMATCH = "invoice_gr_mismatch"
+    MISSING_PURCHASE_ORDER = "missing_purchase_order"
+    NEW_VENDOR = "new_vendor"
+    VENDOR_BANK_DETAIL_CHANGE = "vendor_bank_detail_change"
+    UNUSUAL_VENDOR_AMOUNT = "unusual_vendor_amount"
+    SELF_APPROVED_REQUEST = "self_approved_request"
+    APPROVAL_AUTHORITY_EXCEEDED = "approval_authority_exceeded"
+    MISSING_SUPPORTING_DOCUMENT = "missing_supporting_document"
+    CLOSED_PERIOD_POSTING = "closed_period_posting"
+    ABNORMAL_TRANSACTION_TIMING = "abnormal_transaction_timing"
+    CONTRACT_PRICING_VIOLATION = "contract_pricing_violation"
+    SUSPICIOUS_ROUND_NUMBER_PAYMENT = "suspicious_round_number_payment"
+    PREVIOUSLY_FLAGGED_VENDOR = "previously_flagged_vendor"
+    UNEXPECTED_RECURRING_SUBSCRIPTION = "unexpected_recurring_subscription"
+    OVERDUE_RECEIVABLE = "overdue_receivable"
+    UNUSED_RECURRING_CHARGE = "unused_recurring_charge"
+
+
+class MatchStatus(StrEnum):
+    MATCH = "MATCH"
+    PARTIAL_MATCH = "PARTIAL_MATCH"
+    MISMATCH = "MISMATCH"
+    MISSING_EVIDENCE = "MISSING_EVIDENCE"
+
+
+class ReconStage(StrEnum):
+    EXACT_ONE_TO_ONE = "exact_one_to_one"
+    NORMALIZED_REFERENCE = "normalized_reference"
+    AMOUNT_DATE_FUZZY = "amount_date_fuzzy"
+    ONE_TO_MANY = "one_to_many"
+    FEE_ADJUSTED = "fee_adjusted"
+    REFUND_CHARGEBACK = "refund_chargeback"
+    UNRESOLVED = "unresolved"
+
+
+class RecommendedAction(StrEnum):
+    BLOCK_PAYMENT = "BLOCK_PAYMENT"
+    HOLD_FOR_REVIEW = "HOLD_FOR_REVIEW"
+    REVERSE_APPROVAL = "REVERSE_APPROVAL"
+    REQUIRE_SECONDARY_APPROVAL = "REQUIRE_SECONDARY_APPROVAL"
+    REJECT_POSTING = "REJECT_POSTING"
+    ESCALATE_TO_CFO = "ESCALATE_TO_CFO"
+    INVESTIGATE_BANK_CHANGE = "INVESTIGATE_BANK_CHANGE"
+    REVIEW_CONTRACT_PRICING = "REVIEW_CONTRACT_PRICING"
+    COLLECT_RECEIVABLE = "COLLECT_RECEIVABLE"
+    CANCEL_SUBSCRIPTION = "CANCEL_SUBSCRIPTION"
+    OBTAIN_RECEIPT = "OBTAIN_RECEIPT"
+    OBTAIN_PO = "OBTAIN_PO"
+    NO_FORCED_MATCH = "NO_FORCED_MATCH"
+    REVIEW_DUPLICATE_REFUND = "REVIEW_DUPLICATE_REFUND"

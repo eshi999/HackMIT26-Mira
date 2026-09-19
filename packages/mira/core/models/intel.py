@@ -4,7 +4,7 @@ from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import Date, ForeignKey, Numeric, String, Text
+from sqlalchemy import Boolean, Date, ForeignKey, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
@@ -88,3 +88,18 @@ class ReconciliationCase(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(32), default=ReconciliationStatus.OPEN.value)
     payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     title: Mapped[str] = mapped_column(String(300))
+
+
+class RecurringSubscription(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Expected recurring vendor charge. Used by unused/unexpected subscription detectors."""
+
+    __tablename__ = "recurring_subscriptions"
+
+    company_id: Mapped[UUID] = mapped_column(ForeignKey("companies.id"), index=True)
+    vendor_id: Mapped[UUID] = mapped_column(ForeignKey("vendors.id"), index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    expected_amount: Mapped[Decimal] = mapped_column(MONEY)
+    cadence: Mapped[str] = mapped_column(String(32), default="monthly")
+    is_in_use: Mapped[bool] = mapped_column(Boolean, default=True)
+    start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    cancelled_at: Mapped[date | None] = mapped_column(Date, nullable=True)
