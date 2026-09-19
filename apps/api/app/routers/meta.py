@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from app.config import get_settings
 from mira.agents.protocol import MIRA_ORG
 from mira.integrations.deepgram import DeepgramAdapter
 from mira.integrations.dropbox import StorageAdapter
@@ -15,8 +16,10 @@ router = APIRouter(prefix="/api/v1", tags=["meta"])
 
 @router.get("/meta")
 def meta() -> dict:
+    settings = get_settings()
+
     adapters = [
-        StorageAdapter(),
+        StorageAdapter(settings.dropbox_access_token),
         ElasticAdapter(),
         DeepgramAdapter(),
         VisaAdapter(),
