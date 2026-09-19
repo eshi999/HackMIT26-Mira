@@ -1,0 +1,6 @@
+HELIXCLOUD MASTER SERVICES AGREEMENT
+Customer: Northstar Labs, Inc.
+Auto-renewal: 30-day notice required or term renews for 12 months.
+Liability cap: 12 months of fees.
+Invoice terms: Net 15.
+Seat burst: overage billed at list, not committed rate.

@@ -1,0 +1,9 @@
+Northstar Labs Spend & Authority Policy v3
+Effective 2026-07-01
+
+1. Purchases under $2,500 may be executed by the digital CFO (Mira) against an approved budget line.
+2. Purchases of $2,500 to $10,000 require Controller (Jordan Hale) approval.
+3. Purchases above $10,000 require dual approval: Controller and CFO (Elena Voss).
+4. Preferred vendors must be used when the item is in-category, unless a written exception exists.
+5. Rush software or cloud seat expansions require VP IT sign-off. Precedent 2026-04 applies.
+6. Duplicate vendor invoices (same vendor, amount within $1, invoice number edit-distance ≤ 2, date within 14 days) are blocked, not paid.
