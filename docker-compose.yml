@@ -1,0 +1,39 @@
+# Optional local infrastructure. The API boots on SQLite without this file.
+#   docker compose up -d postgres
+#   DATABASE_URL=postgresql+psycopg://mira:mira@localhost:5432/mira
+#
+# Elastic is a profile so a 24-hour build does not depend on it.
+#   docker compose --profile search up -d
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mira
+      POSTGRES_PASSWORD: mira
+      POSTGRES_DB: mira
+    ports:
+      - "5432:5432"
+    volumes:
+      - mira_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mira -d mira"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
+    profiles: ["search"]
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+    volumes:
+      - mira_es:/usr/share/elasticsearch/data
+
+volumes:
+  mira_pg:
+  mira_es:

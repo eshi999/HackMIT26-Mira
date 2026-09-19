@@ -1,0 +1,39 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# Node
+node_modules/
+apps/web/.next/
+apps/web/out/
+npm-debug.log*
+.pnpm-store/
+
+# Env and local data
+.env
+.env.local
+data/*.db
+data/*.sqlite
+data/mira.db
+*.db
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Test / tooling
+.tox/
+coverage/

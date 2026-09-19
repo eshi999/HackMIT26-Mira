@@ -1,0 +1,12 @@
+{
+  "name": "mira",
+  "private": true,
+  "workspaces": [
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w web",
+    "typecheck": "npm run typecheck -w web",
+    "build": "npm run build -w web"
+  }
+}

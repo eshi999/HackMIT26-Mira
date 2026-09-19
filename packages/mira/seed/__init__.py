@@ -1,0 +1,1 @@
+"""Northstar Labs demo tenant."""
