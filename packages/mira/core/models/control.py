@@ -63,6 +63,11 @@ class Finding(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(32), default=FindingStatus.OPEN.value)
     related_object_type: Mapped[str | None] = mapped_column(String(80), nullable=True)
     related_object_id: Mapped[UUID | None] = mapped_column(nullable=True, index=True)
+    detector: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    confidence_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 4), nullable=True)
+    risk_contribution: Mapped[Decimal | None] = mapped_column(Numeric(6, 2), nullable=True)
+    evidence_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
 
 class Incident(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -74,6 +79,16 @@ class Incident(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(32), default=IncidentStatus.OPEN.value)
     opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    incident_type: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    risk_score: Mapped[Decimal | None] = mapped_column(Numeric(6, 2), nullable=True)
+    risk_level: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    confidence_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 4), nullable=True)
+    evidence_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    related_objects: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    recommended_action: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    scoring_breakdown: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    explanation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    engine_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
 
 class IncidentFinding(UUIDPrimaryKeyMixin, Base):

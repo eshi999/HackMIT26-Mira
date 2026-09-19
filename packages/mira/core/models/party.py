@@ -1,9 +1,20 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
+from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import Boolean, Date, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from mira.core.enums import EmployeeStatus, PartyStatus, RiskTier, UserRole
@@ -52,6 +63,7 @@ class Employee(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     manager_id: Mapped[UUID | None] = mapped_column(ForeignKey("employees.id"), nullable=True)
     hire_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     status: Mapped[str] = mapped_column(String(32), default=EmployeeStatus.ACTIVE.value)
+    approval_limit: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
 
 
 class Vendor(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -68,6 +80,10 @@ class Vendor(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(32), default=PartyStatus.ACTIVE.value)
     is_preferred: Mapped[bool] = mapped_column(Boolean, default=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    onboarded_at: Mapped[date | None] = mapped_column(Date, nullable=True)
+    bank_account_ref: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    previous_bank_account_ref: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    bank_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Customer(UUIDPrimaryKeyMixin, TimestampMixin, Base):

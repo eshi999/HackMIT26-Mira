@@ -184,6 +184,7 @@ def seed_northstar(session: Session) -> Company:
             department="Office of the CFO",
             cost_center="CC-100",
             hire_date=date(2021, 3, 1),
+            approval_limit=Decimal("10000000.00"),
         )
     )
     session.flush()
@@ -199,6 +200,7 @@ def seed_northstar(session: Session) -> Company:
             cost_center="CC-100",
             manager_id=ids.ELENA_EMP,
             hire_date=date(2023, 6, 12),
+            approval_limit=Decimal("10000.00"),
         )
     )
     session.flush()
@@ -214,6 +216,7 @@ def seed_northstar(session: Session) -> Company:
             cost_center="CC-100",
             manager_id=ids.JORDAN_EMP,
             hire_date=date(2024, 1, 8),
+            approval_limit=Decimal("2500.00"),
         )
     )
     session.flush()
@@ -471,8 +474,18 @@ def seed_northstar(session: Session) -> Company:
             "mira_autonomous_limit": 2500,
             "controller_limit": 10000,
             "dual_approval_above": 10000,
+            "cfo_approval_above": 10000,
             "duplicate_amount_tolerance": 1.00,
             "duplicate_date_window_days": 14,
+            "aws_precedent_limit": 12000,
+            "new_vendor_days": 30,
+            "closed_periods": ["2026-06"],
+            "po_required_above": 2500,
+            "po_exempt_vendor_ids": [
+                "aaaaaaaa-bbbb-cccc-dddd-000000000033",
+                "aaaaaaaa-bbbb-cccc-dddd-000000000032",
+            ],
+            "document_required_above": 100,
         },
         effective_at=datetime(2026, 7, 1, tzinfo=UTC),
         status=PolicyStatus.ACTIVE.value,
@@ -1089,6 +1102,9 @@ def seed_northstar(session: Session) -> Company:
             payload={"action": "request_dual_approval_sandbox_purchase", "is_sandbox": True},
         )
     )
+    from mira.seed.phase2 import seed_phase2
+
+    seed_phase2(session, company.id)
     return company
 
 
