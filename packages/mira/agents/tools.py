@@ -428,11 +428,17 @@ def _evidence_adapter() -> ElasticAdapter:
 
 def tool_retrieve_evidence(snapshot: FinanceSnapshot, query: str) -> EvidenceSearchResult:
     adapter = _evidence_adapter()
-    source_system = "elastic" if adapter.status() == AdapterStatus.LIVE else "elastic-demo"
+    live_elastic = adapter.status() == AdapterStatus.LIVE
+    source_system = "elastic" if live_elastic else "elastic-demo"
     try:
-        adapter.project_snapshot(snapshot)
+        # Live Elastic already contains Mira's projected finance/evidence indices.
+        # Do not re-index the entire snapshot during every retrieval.
+        if not live_elastic:
+            adapter.project_snapshot(snapshot)
         docs = adapter.search(query)
     except ElasticIntegrationError:
+        # If live Elastic is unavailable, fall back deterministically to
+        # the in-memory projection so finance workflows can still complete.
         adapter = ElasticAdapter()
         source_system = "elastic-demo"
         adapter.project_snapshot(snapshot)

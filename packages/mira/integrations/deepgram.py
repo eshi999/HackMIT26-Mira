@@ -26,7 +26,7 @@ class Transcript:
 class DeepgramAdapter:
     name = "deepgram"
 
-    def __init__(self, api_key: str | None = None, *, timeout: float = 15.0) -> None:
+    def __init__(self, api_key: str | None = None, *, timeout: float = 8.0) -> None:
         self.api_key = api_key.strip() if api_key else None
         self.timeout = timeout
 

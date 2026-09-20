@@ -603,6 +603,22 @@ def handle_event(
 def executive_request(session: Session, snapshot: FinanceSnapshot, request: str) -> dict:
     """Safe interface for voice/skill/other sponsors. Maps prose onto typed work."""
     text = request.lower()
+
+    def _money(value) -> str:
+        amount = Decimal(value)
+        magnitude = abs(amount)
+
+        if magnitude >= Decimal("1000000"):
+            return f"${amount / Decimal('1000000'):.2f}M"
+
+        if magnitude >= Decimal("1000"):
+            rendered = f"{amount / Decimal('1000'):.1f}"
+            if rendered.endswith(".0"):
+                rendered = rendered[:-2]
+            return f"${rendered}K"
+
+        return f"${amount:,.0f}"
+
     run = start_run(
         session,
         company_id=snapshot.company_id,
@@ -634,10 +650,18 @@ def executive_request(session: Session, snapshot: FinanceSnapshot, request: str)
         artifact["kind"] = "close_status"
         artifact["close"] = status.model_dump(mode="json")
         artifact["period"] = period
-        headline = f"{period} close is {status.completion_pct} complete."
-        body = (
-            f"Completed {len(status.completed)}; blocked {len(status.blocked)}: {', '.join(status.blocked) or 'none'}."
-        )
+        completion_pct = float(status.completion_pct) * 100
+        headline = f"{period} close is {completion_pct:.0f}% complete."
+
+        if status.blocked:
+            body = (
+                f"{len(status.completed)} close task"
+                f"{' is' if len(status.completed) == 1 else 's are'} complete, "
+                f"with {len(status.blocked)} still blocked. "
+                "Open the close review for the underlying blockers and evidence."
+            )
+        else:
+            body = "All close tasks are complete and no blockers remain."
     elif "engineer" in text or "afford" in text:
         fpna = run_fpna_specialist(snapshot, request)
         artifact["kind"] = "scenario"
@@ -667,20 +691,86 @@ def executive_request(session: Session, snapshot: FinanceSnapshot, request: str)
             {"id": str(d.id), "action": d.action, "risk_level": d.risk_level, "rationale": d.rationale}
             for d in pending
         ]
-        headline = f"{len(pending)} payment(s) or decisions still need you."
-        body = "Queue is Decision rows with requires_human_approval, not a generated list."
-    else:
-        overnight = overnight_review(session, snapshot)
-        metrics = tool_calculate_finance_metrics(
-            load_snapshot(session, snapshot.company_id, snapshot.as_of), runtime_only=True
+        headline = (
+            f"{len(pending)} item{'s' if len(pending) != 1 else ''} need your review."
+            if pending
+            else "No approvals are waiting."
         )
-        cash = tool_get_cash_position(load_snapshot(session, snapshot.company_id, snapshot.as_of))
+        body = (
+            "These items are held behind explicit human-approval controls. "
+            "Mira will not execute a gated payment from this request."
+            if pending
+            else "There are currently no finance decisions waiting on a human approval gate."
+        )
+    else:
+        # Executive questions read the already-computed finance state.
+        # They must not trigger overnight workflows or external integrations.
+        live = load_snapshot(session, snapshot.company_id, snapshot.as_of)
+        metrics = tool_calculate_finance_metrics(live, runtime_only=True)
+        cash = tool_get_cash_position(live)
+
+        runtime_savings = [
+            row for row in live.savings
+            if row.source == "runtime"
+        ]
+
+        protected = sum(
+            (
+                row.amount_usd
+                for row in runtime_savings
+                if row.category in {"duplicate_prevented", "policy_block"}
+            ),
+            Decimal("0.00"),
+        )
+
+        hours_returned = sum(
+            (row.hours_saved for row in runtime_savings),
+            Decimal("0.00"),
+        )
+
+        pending_count = (
+            session.query(Decision)
+            .filter(
+                Decision.company_id == snapshot.company_id,
+                Decision.requires_human_approval.is_(True),
+                Decision.status.in_({"awaiting_human", "proposed"}),
+            )
+            .count()
+        )
+
         artifact["kind"] = "finance_review"
-        artifact["overnight"] = {"run_id": overnight.get("run_id"), "processed": len(overnight.get("processed") or [])}
+        artifact["overnight"] = {
+            "read_only": True,
+            "source": "persisted_runtime_state",
+        }
         artifact["metrics"] = metrics.model_dump(mode="json")
         artifact["cash"] = cash.model_dump(mode="json")
-        headline = "Overnight finance review is on the command center."
-        body = cash.explanation
+        artifact["dollars_protected"] = str(protected)
+        artifact["hours_returned"] = str(hours_returned)
+        artifact["pending_approvals"] = pending_count
+
+        headline = "Overnight finance review is complete."
+
+        attention = (
+            f"{pending_count} items still need your review."
+            if pending_count
+            else "No human approvals are waiting."
+        )
+
+        impact = ""
+        if protected > 0 or hours_returned > 0:
+            impact = (
+                f"Mira protected {_money(protected)} and returned "
+                f"{hours_returned:.1f} hours. "
+            )
+
+        body = (
+            f"{impact}"
+            f"Operating cash is {_money(cash.cash.amount)}, "
+            f"with {_money(cash.open_ap.amount)} in open AP "
+            f"and {_money(cash.open_ar.amount)} in open AR. "
+            f"{attention}"
+        )
     live = load_snapshot(session, snapshot.company_id, snapshot.as_of)
     cash = tool_get_cash_position(live)
     risk = tool_assess_risk(live)
@@ -726,27 +816,38 @@ def mira_authority():
 
 
 def command_center_briefing_data(session: Session, snapshot: FinanceSnapshot) -> dict:
-    overnight_review(session, snapshot)
-    period = _period(snapshot)
-    if close_status(session, snapshot.company_id, period) is None:
-        handle_month_end(session, load_snapshot(session, snapshot.company_id, snapshot.as_of), period=period)
-    session.flush()
-    live = load_snapshot(session, snapshot.company_id, snapshot.as_of)
+    """Read-only command-center projection.
+
+    Workflow execution happens separately. Refreshing the UI must never
+    create decisions, memories, savings events, close runs, or external calls.
+    """
+    live = snapshot
+    period = _period(live)
+
     runtime_savings = [s for s in live.savings if s.source == "runtime"]
     protected = sum(
-        (s.amount_usd for s in runtime_savings if s.category in {"duplicate_prevented", "policy_block"}),
+        (
+            s.amount_usd
+            for s in runtime_savings
+            if s.category in {"duplicate_prevented", "policy_block"}
+        ),
         Decimal("0.00"),
     )
     saved = sum(
-        (s.amount_usd for s in runtime_savings if s.category in {"early_pay_discount", "other"}),
+        (
+            s.amount_usd
+            for s in runtime_savings
+            if s.category in {"early_pay_discount", "other"}
+        ),
         Decimal("0.00"),
     )
     hours = sum((s.hours_saved for s in runtime_savings), Decimal("0.00"))
+
     metrics = tool_calculate_finance_metrics(live, runtime_only=True)
     cash = tool_get_cash_position(live)
     recon = metrics.reconciliation_rate
-    from sqlalchemy import func, select
 
+    from sqlalchemy import func, select
     from mira.core.models import Decision, Incident, Payment
 
     pending = list(
@@ -758,33 +859,48 @@ def command_center_briefing_data(session: Session, snapshot: FinanceSnapshot) ->
             )
         )
     )
+
     incidents = session.scalar(
-        select(func.count()).select_from(Incident).where(
-            Incident.company_id == live.company_id, Incident.status.in_({"open", "investigating"})
+        select(func.count())
+        .select_from(Incident)
+        .where(
+            Incident.company_id == live.company_id,
+            Incident.status.in_({"open", "investigating"}),
         )
     )
+
     blocked_payments = session.scalar(
-        select(func.count()).select_from(Payment).where(
-            Payment.company_id == live.company_id, Payment.status.in_({"failed", "void"})
+        select(func.count())
+        .select_from(Payment)
+        .where(
+            Payment.company_id == live.company_id,
+            Payment.status.in_({"failed", "void"}),
         )
     )
+
     close = close_status(session, live.company_id, period)
+
     if protected == 0 and hours == 0:
-        headline = "I have not yet recorded workflow impact. Overnight intake is on the board as zeros until engines write SavingsEvent rows."
-        narrative = (
-            "Elena, displayed dollars and hours come only from runtime SavingsEvent rows. "
-            "Seed fixtures are still in the database for planted engine tests, but they are not this scoreboard."
-        )
+        headline = "Good morning, Elena. Overnight review has no recorded impact yet."
     else:
         headline = (
-            f"I protected {protected} and returned {hours} hours overnight. "
-            + ("I still need you on exceptions." if pending else "No human gate is open.")
+            f"Good morning, Elena. Mira protected ${protected:,.0f} overnight "
+            f"and returned {hours:.1f} hours."
         )
-        narrative = (
-            f"Operating cash {cash.cash.amount}. Open AP {cash.open_ap.amount}. "
-            f"Reconciliation rate {recon}. Autonomous completion {metrics.autonomous_completion_rate}. "
-            "Every number is engine- or workflow-authored."
-        )
+
+    attention = (
+        f"{len(pending)} items need your review."
+        if pending
+        else "No human approvals are waiting."
+    )
+
+    narrative = (
+        f"{attention} "
+        f"Operating cash ${cash.cash.amount:,.0f} · "
+        f"Open AP ${cash.open_ap.amount:,.0f} · "
+        f"Reconciliation {float(recon) * 100:.0f}%."
+    )
+
     return {
         "headline": headline,
         "narrative": narrative,

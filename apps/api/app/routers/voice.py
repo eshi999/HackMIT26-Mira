@@ -35,11 +35,28 @@ def _company_snapshot(db: Session):
 @router.get("/status")
 def voice_status() -> dict:
     settings = get_settings()
-    stt = DeepgramAdapter(settings.deepgram_api_key)
-    tts = ElevenLabsAdapter(settings.elevenlabs_api_key, voice_id=settings.elevenlabs_voice_id)
+
+    stt = DeepgramAdapter(settings.deepgram_api_key, timeout=4.0)
+    tts = ElevenLabsAdapter(
+        settings.elevenlabs_api_key,
+        voice_id=settings.elevenlabs_voice_id,
+        timeout=4.0,
+    )
+
+    try:
+        stt_status = stt.health_check().value
+    except DeepgramIntegrationError:
+        stt_status = "unavailable"
+
+    try:
+        tts_status = tts.health_check().value
+    except ElevenLabsIntegrationError:
+        tts_status = "unavailable"
+
     return {
-        "stt": stt.status().value,
-        "tts": tts.status().value,
+        "stt": stt_status,
+        "tts": tts_status,
+        "voice_ready": stt_status == "live" and tts_status == "live",
         "typed_fallback": True,
         "tts_generates_finance": False,
     }

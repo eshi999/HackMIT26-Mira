@@ -8,7 +8,7 @@ from mira.integrations.base import AdapterStatus
 
 DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
 ELEVENLABS_TTS = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
-ELEVENLABS_USER = "https://api.elevenlabs.io/v1/user"
+ELEVENLABS_VOICE = "https://api.elevenlabs.io/v1/voices/{voice_id}"
 MAX_SPEAK_CHARS = 4000
 
 
@@ -24,7 +24,7 @@ class ElevenLabsAdapter:
         api_key: str | None = None,
         *,
         voice_id: str | None = None,
-        timeout: float = 20.0,
+        timeout: float = 10.0,
     ) -> None:
         self.api_key = api_key.strip() if api_key else None
         self.voice_id = (voice_id or DEFAULT_VOICE_ID).strip() or DEFAULT_VOICE_ID
@@ -38,7 +38,7 @@ class ElevenLabsAdapter:
             return AdapterStatus.DEMO
         try:
             response = httpx.get(
-                ELEVENLABS_USER,
+                ELEVENLABS_VOICE.format(voice_id=self.voice_id),
                 headers=self._headers(),
                 timeout=self.timeout,
             )
