@@ -13,9 +13,15 @@ from uuid import UUID, uuid4
 
 from sqlalchemy.orm import Session
 
+from mira.agents.auth import CanonicalActor
 from mira.core.enums import MemoryStatus, PrecedentStatus
 from mira.core.models import FactualMemory, HistoricalMemory, Precedent, Vendor
 from mira.finance.snapshot import FinanceSnapshot
+
+GRANTING_OUTCOMES = frozenset({"pre_approved", "approved", "pre-approved", "preapproved"})
+REJECTING_OUTCOMES = frozenset(
+    {"rejected", "denied", "not_pre_approved", "not-pre-approved", "revoked", "blocked"}
+)
 
 
 def situation_hash(*parts: str) -> str:
@@ -103,11 +109,24 @@ def record_precedent(
     decision_id: UUID | None = None,
     evidence_ids: list[str] | None = None,
     authorized_at: datetime | None = None,
+    status: PrecedentStatus = PrecedentStatus.ACTIVE,
 ) -> Precedent:
+    digest = situation_hash(scope, reusable_rule, period)
+    existing = (
+        session.query(Precedent)
+        .filter(
+            Precedent.company_id == company_id,
+            Precedent.situation_hash == digest,
+            Precedent.status == PrecedentStatus.ACTIVE.value,
+        )
+        .first()
+    )
+    if existing is not None:
+        return existing
     row = Precedent(
         id=uuid4(),
         company_id=company_id,
-        situation_hash=situation_hash(scope, reusable_rule, period),
+        situation_hash=digest,
         decision_id=decision_id,
         summary=summary,
         outcome=outcome,
@@ -118,7 +137,7 @@ def record_precedent(
         authorizer=authorizer,
         authorized_at=authorized_at or datetime.now(UTC),
         evidence_ids=evidence_ids or [],
-        status=PrecedentStatus.ACTIVE.value,
+        status=status.value,
     )
     session.add(row)
     session.flush()
@@ -214,6 +233,65 @@ def parse_human_feedback_precedent(message: str) -> dict | None:
         "outcome": "pre_approved",
         "authorizer": "human",
     }
+
+
+def authorize_precedent(
+    session: Session,
+    *,
+    company_id: UUID,
+    actor: CanonicalActor,
+    summary: str,
+    reusable_rule: str,
+    outcome: str,
+    period: str,
+    scope: str,
+    vendor: str | None,
+    category: str | None,
+    amount_threshold: Decimal | str,
+    effective_date: date,
+    evidence: list[str],
+    decision_id: UUID | None = None,
+) -> Precedent:
+    """Typed authorization. Free-text comments must not call this."""
+    if not actor.can_authorize_spend:
+        raise PermissionError(f"{actor.name} is not authorized to create spend precedent.")
+    if not evidence:
+        raise ValueError("Audit evidence is required to create a precedent.")
+    if not scope.strip():
+        raise ValueError("Scope is required.")
+    if not vendor and not category:
+        raise ValueError("Vendor or category constraint is required.")
+    normalized = str(outcome).strip().lower().replace(" ", "_")
+    if normalized in REJECTING_OUTCOMES:
+        status = PrecedentStatus.REJECTED
+    elif normalized in GRANTING_OUTCOMES:
+        status = PrecedentStatus.ACTIVE
+    else:
+        raise ValueError("Explicit granting or rejecting outcome is required.")
+    threshold = Decimal(str(amount_threshold))
+    conditions = {
+        "vendor": vendor,
+        "category": category,
+        "max_amount": str(threshold),
+        "effective_date": effective_date.isoformat(),
+        "actor_user_id": str(actor.user_id),
+        "actor_role": actor.role,
+    }
+    return record_precedent(
+        session,
+        company_id=company_id,
+        summary=summary,
+        reusable_rule=reusable_rule,
+        outcome=normalized,
+        period=period,
+        scope=scope,
+        authorizer=actor.name,
+        conditions=conditions,
+        decision_id=decision_id,
+        evidence_ids=evidence,
+        authorized_at=datetime.now(UTC),
+        status=status,
+    )
 
 
 def vendor_is_aws(vendor: Vendor | None, name: str | None = None) -> bool:

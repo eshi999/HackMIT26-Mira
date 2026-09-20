@@ -4,7 +4,6 @@ from fastapi import APIRouter
 
 from app.config import get_settings
 from mira.agents.openai_runtime import HAS_OPENAI_AGENTS, openai_configured
-
 from mira.agents.protocol import MIRA_ORG
 from mira.integrations.deepgram import DeepgramAdapter
 from mira.integrations.dropbox import StorageAdapter

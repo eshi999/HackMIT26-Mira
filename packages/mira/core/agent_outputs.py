@@ -234,6 +234,7 @@ class ScenarioCase(BaseModel):
     name: str
     cash_start: Money
     cash_end_13w: Money
+    cash_min_13w: Money
     weekly: list[dict[str, Any]] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
     explanation: str

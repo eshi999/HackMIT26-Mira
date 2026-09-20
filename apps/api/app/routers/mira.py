@@ -2,14 +2,25 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from datetime import date
+from decimal import Decimal
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.deps import get_db
+from app.deps import get_actor, get_db
+from mira.agents.auth import CanonicalActor
 from mira.agents.close import close_status
+from mira.agents.openai_runtime import run_aws_spend_investigation
 from mira.agents.persist import trace_for_decision
-from mira.agents.runtime import executive_request, handle_event, overnight_review
+from mira.agents.runtime import (
+    executive_request,
+    handle_event,
+    overnight_review,
+    resolve_human_decision,
+    teach_precedent,
+)
 from mira.core.enums import OfficeEventType
 from mira.core.models import Company, Decision
 from mira.finance.snapshot import load_snapshot
@@ -27,21 +38,59 @@ class EventIn(BaseModel):
     payload: dict = Field(default_factory=dict)
 
 
+class PrecedentIn(BaseModel):
+    summary: str
+    reusable_rule: str
+    outcome: str
+    scope: str
+    vendor: str | None = None
+    category: str | None = None
+    amount_threshold: Decimal
+    effective_date: date
+    evidence: list[str] = Field(min_length=1)
+
+
+class ResolveIn(BaseModel):
+    resolution: str = Field(pattern="^(approve|reject)$")
+    comment: str | None = None
+
+
 def _company_snapshot(db: Session):
     company = db.query(Company).filter(Company.slug == "northstar-labs").one()
     return company, load_snapshot(db, company.id, AS_OF.date())
 
 
 @router.post("/executive/request")
-def post_executive_request(body: ExecutiveRequestIn, db: Session = Depends(get_db)) -> dict:
+def post_executive_request(
+    body: ExecutiveRequestIn,
+    db: Session = Depends(get_db),
+    _actor: CanonicalActor = Depends(get_actor),
+) -> dict:
     _company, snapshot = _company_snapshot(db)
     result = executive_request(db, snapshot, body.request)
     db.commit()
     return result
 
 
+@router.post("/executive/investigate")
+def post_executive_investigate(
+    body: ExecutiveRequestIn,
+    db: Session = Depends(get_db),
+    _actor: CanonicalActor = Depends(get_actor),
+) -> dict:
+    """Bounded OpenAI Agents SDK path: Why did September AWS spend increase?"""
+    _company, snapshot = _company_snapshot(db)
+    result = run_aws_spend_investigation(snapshot, body.request)
+    db.commit()
+    return result
+
+
 @router.post("/events")
-def post_event(body: EventIn, db: Session = Depends(get_db)) -> dict:
+def post_event(
+    body: EventIn,
+    db: Session = Depends(get_db),
+    _actor: CanonicalActor = Depends(get_actor),
+) -> dict:
     _company, snapshot = _company_snapshot(db)
     result = handle_event(db, snapshot, body.event_type, body.payload)
     db.commit()
@@ -49,9 +98,67 @@ def post_event(body: EventIn, db: Session = Depends(get_db)) -> dict:
 
 
 @router.post("/overnight")
-def post_overnight(db: Session = Depends(get_db)) -> dict:
+def post_overnight(
+    db: Session = Depends(get_db),
+    _actor: CanonicalActor = Depends(get_actor),
+) -> dict:
     _company, snapshot = _company_snapshot(db)
     result = overnight_review(db, snapshot)
+    db.commit()
+    return result
+
+
+@router.post("/precedents/authorize")
+def post_authorize_precedent(
+    body: PrecedentIn,
+    db: Session = Depends(get_db),
+    actor: CanonicalActor = Depends(get_actor),
+) -> dict:
+    _company, snapshot = _company_snapshot(db)
+    try:
+        result = teach_precedent(
+            db,
+            snapshot,
+            actor,
+            summary=body.summary,
+            reusable_rule=body.reusable_rule,
+            outcome=body.outcome,
+            scope=body.scope,
+            vendor=body.vendor,
+            category=body.category,
+            amount_threshold=body.amount_threshold,
+            effective_date=body.effective_date,
+            evidence=body.evidence,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    db.commit()
+    return result
+
+
+@router.post("/decisions/{decision_id}/resolve")
+def post_resolve_decision(
+    decision_id: str,
+    body: ResolveIn,
+    db: Session = Depends(get_db),
+    actor: CanonicalActor = Depends(get_actor),
+) -> dict:
+    from uuid import UUID
+
+    try:
+        result = resolve_human_decision(
+            db,
+            decision_id=UUID(decision_id),
+            actor=actor,
+            approved=body.resolution == "approve",
+            comment=body.comment,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     db.commit()
     return result
 

@@ -1,6 +1,7 @@
 """Precedent write/read across periods. Not a chat log."""
 
 from mira.memory.store import (
+    authorize_precedent,
     bootstrap_from_snapshot,
     parse_human_feedback_precedent,
     record_factual,
@@ -11,6 +12,7 @@ from mira.memory.store import (
 )
 
 __all__ = [
+    "authorize_precedent",
     "bootstrap_from_snapshot",
     "parse_human_feedback_precedent",
     "record_factual",

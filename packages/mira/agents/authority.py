@@ -18,6 +18,7 @@ def decide_authority(
     is_sandbox: bool = True,
     policy_requires_human: bool = False,
     auditor_rejected: bool = False,
+    mandatory_control_failure: bool = False,
 ) -> AuthorityDecision:
     """HIGH CONFIDENCE + LOW RISK => auto-complete safe internal/sandbox action.
 
@@ -48,6 +49,17 @@ def decide_authority(
             blocks_action=True,
             is_sandbox=is_sandbox,
             reason="Auditor rejected the proposed action on policy, control, evidence, or risk grounds.",
+            confidence=confidence,
+            risk_level=risk_level,
+        )
+    if mandatory_control_failure:
+        return AuthorityDecision(
+            disposition=AuthorityDisposition.BLOCK.value if is_payment else AuthorityDisposition.ESCALATE.value,
+            auto_complete=False,
+            requires_human_approval=True,
+            blocks_action=is_payment,
+            is_sandbox=is_sandbox,
+            reason="Mandatory evidence, arithmetic, or match failure cannot be offset by a low risk score.",
             confidence=confidence,
             risk_level=risk_level,
         )

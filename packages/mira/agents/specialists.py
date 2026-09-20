@@ -22,15 +22,33 @@ from mira.core.agent_outputs import (
     AgentTaskResult,
     AuditorVerdict,
     AuthorityBasis,
+    Confidence,
     InvoiceDecision,
     ToolCallRecord,
 )
 from mira.core.enums import AgentRole, AgentTaskStatus, MatchStatus, RiskLevel
 from mira.core.money import Money
 from mira.finance.snapshot import FinanceSnapshot
+from mira.policies.engine import POL_SPEND_CFO_10K
+
+_RISK_ORDER = {
+    RiskLevel.LOW: 0,
+    RiskLevel.MEDIUM: 1,
+    RiskLevel.HIGH: 2,
+    RiskLevel.CRITICAL: 3,
+}
+SPENDING_ACTIONS = {"pay", "schedule"}
 
 
-def _dump_call(tool: str, output) -> dict:
+def conservative_confidence(*confs: Confidence) -> Confidence:
+    return min(confs, key=lambda row: row.score)
+
+
+def max_risk_level(*levels: RiskLevel) -> RiskLevel:
+    return max(levels, key=lambda lvl: _RISK_ORDER[lvl])
+
+
+def _dump_call(tool: str, output, *, input_payload: dict | None = None) -> dict:
     if hasattr(output, "model_dump"):
         payload = output.model_dump(mode="json")
         if tool == "assess_risk" and isinstance(payload, dict):
@@ -50,7 +68,7 @@ def _dump_call(tool: str, output) -> dict:
         payload = output
     return ToolCallRecord(
         tool=tool,
-        input={},
+        input=input_payload or {},
         output_type=type(output).__name__ if not isinstance(output, dict) else "dict",
         output=payload if isinstance(payload, dict) else {"value": payload},
     ).model_dump(mode="json")
@@ -60,9 +78,11 @@ def run_ap_specialist(snapshot: FinanceSnapshot, invoice_id: UUID) -> AgentTaskR
     matched = tool_evaluate_invoice(snapshot, invoice_id)
     duplicates = tool_detect_duplicates(snapshot, invoice_id)
     three_way = tool_three_way_match(snapshot, invoice_id)
+    risk = tool_assess_risk(snapshot, invoice_id)
     action = invoice_operational_action(matched)
     invoice = snapshot.invoice(invoice_id)
     assert invoice is not None
+    invoice_input = {"invoice_id": str(invoice_id)}
     decision = InvoiceDecision(
         invoice_id=invoice_id,
         action=action,  # type: ignore[arg-type]
@@ -70,10 +90,11 @@ def run_ap_specialist(snapshot: FinanceSnapshot, invoice_id: UUID) -> AgentTaskR
         duplicate_of_invoice_id=duplicates.duplicate_invoice_ids[0] if duplicates.duplicate_invoice_ids else None,
         explanation=(
             f"AP operational recommendation is {action} from three-way status "
-            f"{matched.status.value} and duplicate={duplicates.is_duplicate}."
+            f"{matched.status.value} and duplicate={duplicates.is_duplicate}. "
+            f"Risk engine max level {risk.max_risk_level.value}."
         ),
-        confidence=matched.confidence,
-        risk_level=RiskLevel.LOW if matched.status == MatchStatus.MATCH and not duplicates.is_duplicate else RiskLevel.MEDIUM,
+        confidence=conservative_confidence(matched.confidence, risk.confidence),
+        risk_level=risk.max_risk_level,
         policy_basis="AP does not evaluate spend policy; auditor does.",
         authority_basis=AuthorityBasis(
             policy_name="AP operating procedure",
@@ -91,10 +112,16 @@ def run_ap_specialist(snapshot: FinanceSnapshot, invoice_id: UUID) -> AgentTaskR
             "decision": decision.model_dump(mode="json"),
             "three_way": three_way.model_dump(mode="json"),
             "duplicates": duplicates.model_dump(mode="json"),
+            "risk": {
+                "max_risk_level": risk.max_risk_level.value,
+                "confidence": risk.confidence.model_dump(mode="json"),
+                "subject_finding_types": list(risk.subject_finding_types),
+            },
             "tool_calls": [
-                _dump_call("evaluate_invoice", matched),
-                _dump_call("detect_duplicates", duplicates),
-                _dump_call("three_way_match", three_way),
+                _dump_call("evaluate_invoice", matched, input_payload=invoice_input),
+                _dump_call("detect_duplicates", duplicates, input_payload=invoice_input),
+                _dump_call("three_way_match", three_way, input_payload=invoice_input),
+                _dump_call("assess_risk", risk, input_payload=invoice_input),
             ],
         },
         explanation=decision.explanation,
@@ -176,9 +203,16 @@ def run_auditor_specialist(
     conflicting: list[str] = []
     if policy.evaluation.violated_policy_ids:
         reasons.append(policy.evaluation.explanation)
-    if matched.status.value in {"MISMATCH", "MISSING_EVIDENCE"}:
+    if matched.status.value in {"MISMATCH", "MISSING_EVIDENCE", "INVALID_ARITHMETIC"}:
         missing.append(matched.explanation)
         reasons.append(matched.explanation)
+    if (
+        isinstance(contract, dict)
+        and contract.get("status") in {"UNKNOWN", "INCOMPLETE"}
+        and contract.get("payment_validation_required")
+    ):
+        missing.append(str(contract.get("explanation")))
+        reasons.append(str(contract.get("explanation")))
     if isinstance(contract, dict) and contract.get("is_violation"):
         conflicting.append(str(contract.get("explanation")))
         reasons.append(str(contract.get("explanation")))
@@ -212,10 +246,14 @@ def run_auditor_specialist(
         artifact={
             "verdict": verdict.model_dump(mode="json"),
             "tool_calls": [
-                _dump_call("evaluate_policy", policy),
-                _dump_call("assess_risk", risk),
-                _dump_call("three_way_match", matched),
-                _dump_call("retrieve_evidence", evidence),
+                _dump_call(
+                    "evaluate_policy",
+                    policy,
+                    input_payload={"subject_type": "invoice", "subject_id": str(invoice_id)},
+                ),
+                _dump_call("assess_risk", risk, input_payload={"invoice_id": str(invoice_id)}),
+                _dump_call("three_way_match", matched, input_payload={"invoice_id": str(invoice_id)}),
+                _dump_call("retrieve_evidence", evidence, input_payload={"query": str(invoice_id)}),
             ],
         },
         explanation=verdict.explanation,
@@ -237,7 +275,9 @@ def run_fpna_specialist(snapshot: FinanceSnapshot, question: str | None = None) 
         ],
     }
     if question and "engineer" in question.lower():
-        scenario = tool_afford_engineers(snapshot, 3)
+        from mira.forecasting.cash import parse_headcount
+
+        scenario = tool_afford_engineers(snapshot, parse_headcount(question))
         artifact["scenario"] = scenario.model_dump(mode="json")
         artifact["tool_calls"].append(_dump_call("calculate_finance_metrics", scenario))
         explanation = scenario.recommendation
@@ -268,15 +308,35 @@ def adjudicate_invoice(
     verdict = AuditorVerdict.model_validate(auditor.artifact["verdict"])
     policy = tool_evaluate_policy(snapshot, subject_type="invoice", subject_id=invoice_id)
     risk = tool_assess_risk(snapshot, subject_id=invoice_id)
+    confidence = conservative_confidence(ap_decision.confidence, verdict.confidence, risk.confidence)
+    risk_level = max_risk_level(ap_decision.risk_level, verdict.risk_level, risk.max_risk_level)
+    spending = ap_decision.action in SPENDING_ACTIONS
+    violations = [
+        policy_id
+        for policy_id in policy.evaluation.violated_policy_ids
+        if spending or policy_id != POL_SPEND_CFO_10K
+    ]
+    match_status = str((ap.artifact.get("three_way") or {}).get("status") or "")
+    incomplete_contract = any(
+        "INCOMPLETE" in reason or "UNKNOWN" in reason for reason in (verdict.reasons or [])
+    )
+    mandatory = match_status in {
+        MatchStatus.MISSING_EVIDENCE.value,
+        MatchStatus.INVALID_ARITHMETIC.value,
+        MatchStatus.MISMATCH.value,
+    } or incomplete_contract
     gate = decide_authority(
-        confidence=ap_decision.confidence,
-        risk_level=verdict.risk_level if verdict.rejected else risk.max_risk_level,
-        is_payment=ap_decision.action == "pay",
+        confidence=confidence,
+        risk_level=risk_level,
+        is_payment=spending,
         is_sandbox=True,
-        policy_requires_human=policy.evaluation.requires_human_approval,
+        policy_requires_human=bool(violations),
         auditor_rejected=verdict.rejected,
+        mandatory_control_failure=mandatory,
     )
     action = ap_decision.action
+    if mandatory and action == "pay":
+        action = "hold"
     if verdict.rejected:
         action = "escalate" if gate.requires_human_approval else "hold"
         if gate.blocks_action:
@@ -290,8 +350,8 @@ def adjudicate_invoice(
             f"Mira adjudication: AP recommended {ap_decision.action}; auditor {verdict.verdict}. "
             f"{gate.reason}"
         ),
-        confidence=ap_decision.confidence,
-        risk_level=verdict.risk_level,
+        confidence=confidence,
+        risk_level=risk_level,
         policy_basis=policy.evaluation.explanation,
         authority_basis=AuthorityBasis(
             policy_name="HITL authority matrix",

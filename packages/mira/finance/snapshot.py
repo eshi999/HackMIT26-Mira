@@ -107,6 +107,7 @@ class InvoiceView(BaseModel):
     due_date: date | None
     total: Decimal
     subtotal: Decimal
+    tax_total: Decimal = Decimal("0.00")
     currency: str
     status: str
     purchase_order_id: UUID | None
@@ -527,6 +528,7 @@ def load_snapshot(session: Session, company_id: UUID, as_of: date) -> FinanceSna
                 due_date=row.due_date,
                 total=row.total,
                 subtotal=row.subtotal,
+                tax_total=row.tax_total,
                 currency=row.currency,
                 status=row.status,
                 purchase_order_id=row.purchase_order_id,

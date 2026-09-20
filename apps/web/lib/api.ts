@@ -110,6 +110,29 @@ export async function fetchBriefing(): Promise<Briefing | null> {
   }
 }
 
+export async function resolveDecision(
+  decisionId: string,
+  resolution: "approve" | "reject",
+  comment?: string,
+): Promise<Record<string, unknown> | null> {
+  const token = process.env.NEXT_PUBLIC_MIRA_DEMO_TOKEN ?? "mira-demo-elena";
+  try {
+    const res = await fetch(`${API}/api/v1/decisions/${decisionId}/resolve`, {
+      method: "POST",
+      cache: "no-store",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ resolution, comment: comment ?? null }),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchMeta(): Promise<Record<string, unknown> | null> {
   try {
     const res = await fetch(`${API}/api/v1/meta`, { cache: "no-store" });

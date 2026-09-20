@@ -8,8 +8,9 @@ from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
+from mira.agents.auth import resolve_demo_token
 from mira.agents.persist import trace_for_decision
-from mira.agents.runtime import handle_human_feedback, process_invoice
+from mira.agents.runtime import process_invoice, teach_precedent
 from mira.agents.tools import tool_calculate_finance_metrics
 from mira.core.enums import InvoiceDirection, InvoiceStatus, POStatus, ReceiptStatus
 from mira.core.models import (
@@ -120,11 +121,21 @@ def run_precedent_evaluation(session: Session, as_of: date) -> dict:
     baseline_packet = process_invoice(session, snapshot, baseline_inv.id)
     baseline_metrics = _metrics(session, as_of)
 
-    feedback = handle_human_feedback(
+    elena = resolve_demo_token("mira-demo-elena")
+    assert elena is not None
+    feedback = teach_precedent(
         session,
         load_snapshot(session, ids.COMPANY, as_of),
-        "AWS infrastructure invoices under $12,000 are pre-approved.",
-        authorizer="Elena Voss",
+        elena,
+        summary="AWS infrastructure invoices under $12,000 are pre-approved.",
+        reusable_rule="AWS infrastructure invoices under $12,000 are pre-approved without secondary review.",
+        outcome="pre_approved",
+        scope="aws_infrastructure_spend",
+        vendor="Amazon Web Services",
+        category="infrastructure",
+        amount_threshold=Decimal("12000.00"),
+        effective_date=as_of,
+        evidence=["typed-authorization:elena-cfo", "evaluation-harness"],
     )
 
     learned_inv = _add_aws_invoice(

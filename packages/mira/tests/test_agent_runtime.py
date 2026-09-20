@@ -172,14 +172,14 @@ def test_aws_precedent_learning_and_new_vendor_control(seeded_session, as_of) ->
 
 def test_month_end_dependency_ordering(seeded_session, as_of) -> None:
     snapshot = _snap(seeded_session, as_of)
-    status = execute_close(seeded_session, snapshot, fail_keys=frozenset({"ap_close"}))
+    status = execute_close(seeded_session, snapshot, fail_keys=frozenset({"document_readiness"}))
     by_key = {t.key: t for t in status.tasks}
-    assert by_key["ap_close"].status == AgentTaskStatus.FAILED
-    assert by_key["accrual_prepaid_review"].status == AgentTaskStatus.BLOCKED
-    assert by_key["balance_sheet_evidence"].status == AgentTaskStatus.BLOCKED
-    assert by_key["report_board_preparation"].status == AgentTaskStatus.BLOCKED
-    assert by_key["ar_close"].status == AgentTaskStatus.COMPLETED
+    assert by_key["document_readiness"].status == AgentTaskStatus.FAILED
+    assert by_key["ap_close"].status == AgentTaskStatus.BLOCKED
+    assert by_key["ar_close"].status == AgentTaskStatus.BLOCKED
+    assert by_key["bank_reconciliation"].status == AgentTaskStatus.BLOCKED
     assert by_key["payroll_readiness"].status == AgentTaskStatus.COMPLETED
+    assert by_key["report_board_preparation"].status == AgentTaskStatus.BLOCKED
     assert "ap_close" in status.blocked
     assert status.completion_pct < Decimal("1.00")
     keys = [n[0] for n in CLOSE_NODES]
@@ -207,7 +207,7 @@ def test_scenario_analysis_is_deterministic(seeded_session, as_of) -> None:
     first = afford_engineers(snapshot, headcount=3)
     second = afford_engineers(snapshot, headcount=3)
     assert first.base_case.cash_end_13w == second.base_case.cash_end_13w
-    assert first.delayed_receivable_case.cash_end_13w != first.base_case.cash_end_13w or True
+    assert first.delayed_receivable_case.weekly[0]["ar_in"] != first.base_case.weekly[0]["ar_in"]
     assert "assumption" in " ".join(first.assumptions).lower() or first.assumptions
     result = executive_request(seeded_session, snapshot, "Can we afford three new engineers?")
     assert result["kind"] == "scenario"
@@ -222,7 +222,8 @@ def test_human_feedback_event_and_openai_org_contract(seeded_session, as_of) -> 
         snapshot,
         "AWS infrastructure invoices under $12,000 are pre-approved.",
     )
-    assert result["precedent_id"]
+    assert result["precedent_id"] is None
+    assert result["authority_created"] is False
     org = build_org()
     assert org["tool_names"]
     handoff = example_handoff()

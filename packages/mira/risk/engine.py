@@ -28,8 +28,13 @@ def run_for_company(session: Session, company_id: UUID, as_of) -> RiskEngineResu
 
 
 def persist_result(session: Session, company_id: UUID, result: RiskEngineResult, opened_at: datetime) -> None:
-    """Optional materialization. Seeded demo findings are separate from engine output."""
+    """Optional materialization. Seeded demo findings are separate from engine output.
+
+    Finding and incident IDs are deterministic (uuid5), so a second persist is a no-op.
+    """
     for finding in result.findings:
+        if session.get(Finding, finding.id) is not None:
+            continue
         session.add(
             Finding(
                 id=finding.id,
@@ -49,25 +54,33 @@ def persist_result(session: Session, company_id: UUID, result: RiskEngineResult,
             )
         )
     for incident in result.incidents:
-        session.add(
-            Incident(
-                id=incident.id,
-                company_id=company_id,
-                title=incident.title,
-                severity=incident.risk_level.value,
-                status=IncidentStatus.OPEN.value,
-                opened_at=opened_at,
-                incident_type=incident.findings[0].finding_type.value if incident.findings else None,
-                risk_score=incident.risk_score,
-                risk_level=incident.risk_level.value,
-                confidence_score=incident.confidence.score,
-                evidence_ids=[str(eid) for eid in incident.evidence_ids],
-                related_objects=[rel.model_dump(mode="json") for rel in incident.related_objects],
-                recommended_action=incident.recommended_action.value,
-                scoring_breakdown=incident.scoring_breakdown.model_dump(mode="json"),
-                explanation=incident.explanation,
-                engine_version=incident.engine_version,
+        if session.get(Incident, incident.id) is None:
+            session.add(
+                Incident(
+                    id=incident.id,
+                    company_id=company_id,
+                    title=incident.title,
+                    severity=incident.risk_level.value,
+                    status=IncidentStatus.OPEN.value,
+                    opened_at=opened_at,
+                    incident_type=incident.findings[0].finding_type.value if incident.findings else None,
+                    risk_score=incident.risk_score,
+                    risk_level=incident.risk_level.value,
+                    confidence_score=incident.confidence.score,
+                    evidence_ids=[str(eid) for eid in incident.evidence_ids],
+                    related_objects=[rel.model_dump(mode="json") for rel in incident.related_objects],
+                    recommended_action=incident.recommended_action.value,
+                    scoring_breakdown=incident.scoring_breakdown.model_dump(mode="json"),
+                    explanation=incident.explanation,
+                    engine_version=incident.engine_version,
+                )
             )
-        )
         for finding in incident.findings:
+            link_exists = session.query(IncidentFinding).filter(
+                IncidentFinding.incident_id == incident.id,
+                IncidentFinding.finding_id == finding.id,
+            ).first()
+            if link_exists is not None:
+                continue
             session.add(IncidentFinding(incident_id=incident.id, finding_id=finding.id))
+    session.flush()

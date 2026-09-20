@@ -464,8 +464,9 @@ def detect_contract_pricing_violation(snapshot: FinanceSnapshot) -> list[Finding
         terms = contract.extracted_terms or {}
         if "agreed_price" not in terms and "agreed_price_amount" not in terms:
             continue
-        fallback = Money(amount=contract.value or Decimal("0"), currency=contract.currency)
-        facts = facts_from_extracted(terms, fallback_price=fallback)
+        facts = facts_from_extracted(terms)
+        if facts is None:
+            continue
         for invoice in snapshot.ap_invoices():
             if invoice.vendor_id != contract.vendor_id:
                 continue
@@ -473,7 +474,6 @@ def detect_contract_pricing_violation(snapshot: FinanceSnapshot) -> list[Finding
             if terms.get("applies_invoice_numbers") and invoice.invoice_number not in terms["applies_invoice_numbers"]:
                 continue
             if not terms.get("applies_invoice_numbers"):
-                # Default: only invoices whose total is in the same order of magnitude as agreed price.
                 if invoice.total < facts.agreed_price.amount * Decimal("0.5"):
                     continue
                 if invoice.total > facts.agreed_price.amount * Decimal("2"):
@@ -485,7 +485,7 @@ def detect_contract_pricing_violation(snapshot: FinanceSnapshot) -> list[Finding
                 invoice_amount=Money(amount=invoice.total, currency=invoice.currency),
                 invoice_date=invoice.issue_date,
             )
-            if not comparison.is_violation:
+            if comparison.is_violation is not True:
                 continue
             findings.append(
                 _finding(

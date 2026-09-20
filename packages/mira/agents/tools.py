@@ -6,6 +6,7 @@ for an amount, score, match, or policy outcome.
 
 from __future__ import annotations
 
+import os
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -21,7 +22,8 @@ from mira.finance.cash import CashPositionResult, get_cash_position
 from mira.finance.contracts import compare_invoice_to_contract, facts_from_extracted
 from mira.finance.snapshot import FinanceSnapshot
 from mira.forecasting.cash import afford_engineers
-from mira.integrations.elastic import ElasticAdapter
+from mira.integrations.base import AdapterStatus
+from mira.integrations.elastic import ElasticAdapter, ElasticIntegrationError
 from mira.integrations.public_data import PublicDataAdapter, PublicDataObservation
 from mira.policies.engine import evaluate_invoice, evaluate_subject
 from mira.policies.types import PolicyEvaluation, PolicySubject
@@ -57,6 +59,7 @@ TOOL_NAMES = (
     "calculate_finance_metrics",
     "calculate_autonomy_score",
     "obtain_public_signal",
+    "investigate_aws_spend",
 )
 
 
@@ -245,22 +248,33 @@ def tool_evaluate_policy(
 def tool_assess_risk(snapshot: FinanceSnapshot, subject_id: UUID | None = None) -> RiskToolResult:
     result = _cached_risk(snapshot)
     findings = result.findings
+    incidents = result.incidents
     if subject_id is not None:
         findings = tuple(
             f for f in result.findings if any(rel.object_id == subject_id for rel in f.related_objects)
         )
+        incidents = tuple(
+            inc
+            for inc in result.incidents
+            if any(rel.object_id == subject_id for rel in inc.related_objects)
+        )
     level = _risk_level_from_result(result, subject_id)
-    conf_score = min((f.confidence.score for f in findings), default=Decimal("0.80"))
+    if incidents:
+        conf_score = min(inc.confidence.score for inc in incidents)
+        basis = "Minimum incident confidence from the risk engine for this subject."
+    elif findings:
+        conf_score = min(f.confidence.score for f in findings)
+        basis = "Minimum finding confidence from the risk engine for this subject."
+    else:
+        conf_score = Decimal("0.99")
+        basis = "Risk engine completed with no findings for this subject."
     return RiskToolResult(
         subject_type="invoice" if subject_id else "company",
         subject_id=subject_id,
         result=result,
         subject_finding_types=tuple(f.finding_type.value for f in findings),
         max_risk_level=level,
-        confidence=Confidence(
-            score=conf_score,
-            basis="Risk engine findings; score is engine-computed, not agent-authored.",
-        ),
+        confidence=Confidence(score=conf_score, basis=basis),
         explanation=(
             f"{len(findings)} finding(s) for subject; max risk {level.value}."
             if findings
@@ -343,10 +357,45 @@ def tool_evaluate_contract(snapshot: FinanceSnapshot, invoice_id: UUID) -> dict[
                 mode="json"
             ),
         }
+    facts = facts_from_extracted(contract.extracted_terms)
+    terms = contract.extracted_terms or {}
+    price_expected = any(
+        key in terms
+        for key in (
+            "agreed_price",
+            "agreed_price_amount",
+            "allowed_annual_increase_pct",
+            "allowed_annual_increase",
+            "applies_invoice_numbers",
+        )
+    )
+    if facts is None:
+        return {
+            "invoice_id": str(invoice_id),
+            "contract_id": str(contract.id),
+            "has_contract": True,
+            "is_complete": False,
+            "is_violation": None,
+            "status": "UNKNOWN",
+            "payment_validation_required": price_expected,
+            "explanation": (
+                "INCOMPLETE: required contract facts (agreed price / allowed increase) are "
+                "missing. Price was not inferred from the invoice. Escalate before payment."
+                if price_expected
+                else (
+                    "INCOMPLETE: vendor contract is on file without extracted price terms. "
+                    "Invoice total was not substituted as agreed price."
+                )
+            ),
+            "confidence": Confidence(
+                score=Decimal("0.40"),
+                basis="Contract row exists but extracted_terms lack agreed_price; invoice total was not substituted.",
+            ).model_dump(mode="json"),
+        }
     comparison = compare_invoice_to_contract(
         contract_id=contract.id,
         invoice_id=invoice.id,
-        facts=facts_from_extracted(contract.extracted_terms, fallback_price=Money(amount=invoice.total)),
+        facts=facts,
         invoice_amount=Money(amount=invoice.total, currency=invoice.currency),
         invoice_date=invoice.issue_date,
     )
@@ -370,17 +419,31 @@ def tool_get_company_context(snapshot: FinanceSnapshot) -> CompanyContext:
     )
 
 
+def _evidence_adapter() -> ElasticAdapter:
+    """Use configured Elastic when present; never fail closed if the cluster is down."""
+    url = os.environ.get("ELASTICSEARCH_URL") or None
+    api_key = os.environ.get("ELASTICSEARCH_API_KEY") or None
+    return ElasticAdapter(url, api_key=api_key)
+
+
 def tool_retrieve_evidence(snapshot: FinanceSnapshot, query: str) -> EvidenceSearchResult:
-    adapter = ElasticAdapter()
-    adapter.project_snapshot(snapshot)
-    docs = adapter.search(query)
+    adapter = _evidence_adapter()
+    source_system = "elastic" if adapter.status() == AdapterStatus.LIVE else "elastic-demo"
+    try:
+        adapter.project_snapshot(snapshot)
+        docs = adapter.search(query)
+    except ElasticIntegrationError:
+        adapter = ElasticAdapter()
+        source_system = "elastic-demo"
+        adapter.project_snapshot(snapshot)
+        docs = adapter.search(query)
     hits = [
         EvidenceHit(
             object_type=doc.source_type,
             object_id=doc.source_id,
             title=str(doc.body.get("title") or doc.source_type),
             snippet=str(doc.body.get("body") or "")[:280] or None,
-            source_system="elastic-demo",
+            source_system=source_system,
         )
         for doc in docs[:12]
     ]
@@ -467,6 +530,12 @@ def tool_afford_engineers(snapshot: FinanceSnapshot, headcount: int = 3) -> Scen
 
 def invoice_operational_action(matched: ThreeWayMatchResult) -> str:
     """AP operational recommendation from match/duplicate tools only."""
+    if matched.status in {
+        MatchStatus.INVALID_ARITHMETIC,
+        MatchStatus.MISSING_EVIDENCE,
+        MatchStatus.MISMATCH,
+    }:
+        return "hold"
     if matched.duplicate_invoice_ids:
         return "reject"
     if matched.status == MatchStatus.MATCH:
@@ -474,3 +543,51 @@ def invoice_operational_action(matched: ThreeWayMatchResult) -> str:
     if matched.status in {MatchStatus.PARTIAL_MATCH}:
         return "hold"
     return "hold"
+
+
+def collect_aws_spend_evidence(snapshot: FinanceSnapshot, period: str = "2026-09") -> dict[str, Any]:
+    """Ledger-backed AWS spend comparison. The model may explain this, not invent it."""
+    aws = next(
+        (v for v in snapshot.vendors if "aws" in v.name.lower() or "amazon web" in v.name.lower()),
+        None,
+    )
+    invoices = [
+        inv
+        for inv in snapshot.ap_invoices()
+        if aws is not None and inv.vendor_id == aws.id
+    ]
+    by_period: dict[str, list[dict[str, str]]] = {}
+    for inv in invoices:
+        key = inv.posted_period or f"{inv.issue_date.year:04d}-{inv.issue_date.month:02d}"
+        by_period.setdefault(key, []).append(
+            {
+                "invoice_id": str(inv.id),
+                "invoice_number": inv.invoice_number,
+                "total": str(inv.total),
+                "currency": inv.currency,
+                "issue_date": inv.issue_date.isoformat(),
+            }
+        )
+    totals = {
+        key: str(sum((Decimal(row["total"]) for row in rows), Decimal("0.00")))
+        for key, rows in by_period.items()
+    }
+    year, month = period.split("-")
+    prior_month = f"{year}-{int(month) - 1:02d}" if month != "01" else f"{int(year) - 1}-12"
+    current_total = Decimal(totals.get(period, "0"))
+    prior_total = Decimal(totals.get(prior_month, "0"))
+    delta = current_total - prior_total
+    cash = get_cash_position(snapshot)
+    return {
+        "vendor": aws.name if aws else None,
+        "period": period,
+        "prior_period": prior_month,
+        "period_total": str(current_total),
+        "prior_total": str(prior_total),
+        "delta": str(delta),
+        "invoices_by_period": by_period,
+        "period_totals": totals,
+        "cash": str(cash.cash.amount),
+        "source": "ledger_snapshot",
+        "invented": False,
+    }

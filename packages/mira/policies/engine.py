@@ -53,12 +53,14 @@ def evaluate_subject(snapshot: FinanceSnapshot, subject: PolicySubject) -> Polic
     used_precedents: list[UUID] = []
 
     aws_carveout = False
+    granting_outcomes = {"pre_approved", "approved", "pre-approved", "preapproved"}
     if _aws_vendor(subject.vendor_name) and subject.amount < aws_precedent_limit:
         precedent = next(
             (
                 row
                 for row in snapshot.precedents
                 if getattr(row, "status", "active") == "active"
+                and str(getattr(row, "outcome", "") or "").lower() in granting_outcomes
                 and (
                     "aws" in (row.reusable_rule or "").lower()
                     or "aws" in row.summary.lower()

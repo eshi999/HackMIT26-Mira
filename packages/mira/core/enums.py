@@ -171,11 +171,13 @@ class RiskLevel(StrEnum):
 
 
 class DecisionStatus(StrEnum):
+    EVALUATED = "evaluated"
     PROPOSED = "proposed"
     AWAITING_HUMAN = "awaiting_human"
     APPROVED = "approved"
     REJECTED = "rejected"
     EXECUTED = "executed"
+    FAILED = "failed"
     SUPERSEDED = "superseded"
 
 
@@ -245,6 +247,7 @@ class AgentTaskStatus(StrEnum):
 class PrecedentStatus(StrEnum):
     ACTIVE = "active"
     REVOKED = "revoked"
+    REJECTED = "rejected"
 
 
 class MemoryStatus(StrEnum):
@@ -325,6 +328,7 @@ class MatchStatus(StrEnum):
     PARTIAL_MATCH = "PARTIAL_MATCH"
     MISMATCH = "MISMATCH"
     MISSING_EVIDENCE = "MISSING_EVIDENCE"
+    INVALID_ARITHMETIC = "INVALID_ARITHMETIC"
 
 
 class ReconStage(StrEnum):

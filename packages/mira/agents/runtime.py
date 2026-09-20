@@ -15,13 +15,17 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from mira.agents.close import CLOSE_PERIOD, close_status, execute_close
+from mira.agents.auth import CanonicalActor
+from mira.agents.close import CLOSE_PERIOD, close_status, execute_close, parse_close_period
 from mira.agents.events import attach_run, finish_event, record_event
 from mira.agents.persist import (
     complete_task,
     create_task,
+    decision_status_for_action,
+    existing_runtime_invoice_decision,
     finish_run,
     now,
+    resolve_decision,
     start_run,
     write_decision,
     write_savings,
@@ -39,23 +43,23 @@ from mira.agents.tools import (
     tool_calculate_finance_metrics,
     tool_get_cash_position,
 )
-from mira.core.agent_outputs import CFORecommendation, CloseWorkflowStatus
+from mira.core.agent_outputs import CFORecommendation, CloseWorkflowStatus, Confidence
 from mira.core.enums import (
     ActorType,
     AgentRole,
     AgentRunStatus,
     AgentTaskStatus,
-    DecisionStatus,
     OfficeEventStatus,
     OfficeEventType,
     SavingsCategory,
 )
-from mira.core.models import AgentRun, OfficeEvent
+from mira.core.models import AgentRun, AgentTask, Decision, OfficeEvent
 from mira.finance.snapshot import FinanceSnapshot, load_snapshot
 from mira.memory.store import (
+    authorize_precedent,
     bootstrap_from_snapshot,
     parse_human_feedback_precedent,
-    record_precedent,
+    record_factual,
 )
 from mira.risk.engine import persist_result
 
@@ -63,7 +67,15 @@ INTAKE_HOURS = Decimal("0.25")
 DUPLICATE_HOURS = Decimal("1.50")
 POLICY_HOURS = Decimal("0.50")
 WORKFLOW_INVOICE = "runtime.invoice_received"
-WORKFLOW_OVERNIGHT = "overnight_review"
+
+
+def overnight_workflow_type(as_of) -> str:
+    return f"overnight_review:{as_of.isoformat()}"
+
+
+def duplicate_canonical_id(invoice_id: UUID, duplicate_ids: list | tuple) -> UUID:
+    members = [invoice_id, *[UUID(str(item)) for item in duplicate_ids]]
+    return min(members)
 
 
 def _period(snapshot: FinanceSnapshot) -> str:
@@ -79,6 +91,44 @@ def _hours_for(decision_action: str, is_duplicate: bool, policy_blocked: bool) -
     return hours
 
 
+def _packet_from_decision(session: Session, decision, invoice_id: UUID) -> dict:
+    tasks: list[AgentTask] = []
+    if decision.agent_run_id is not None:
+        tasks = session.query(AgentTask).filter(AgentTask.agent_run_id == decision.agent_run_id).all()
+    invoice_key = str(invoice_id)
+
+    def _for_role(role: str) -> AgentTask | None:
+        return next(
+            (
+                task
+                for task in tasks
+                if task.agent_role == role and invoice_key in (task.related_object_ids or [])
+            ),
+            None,
+        )
+
+    ap = _for_role(AgentRole.ACCOUNTS_PAYABLE.value)
+    auditor = _for_role(AgentRole.AUDIT.value)
+    ap_action = None
+    auditor_verdict = None
+    if ap and isinstance(ap.result_payload, dict):
+        ap_action = (ap.result_payload.get("decision") or {}).get("action")
+    if auditor and isinstance(auditor.result_payload, dict):
+        auditor_verdict = (auditor.result_payload.get("verdict") or {}).get("verdict")
+    proposed = ap_action or decision.action
+    return {
+        "run_id": str(decision.agent_run_id) if decision.agent_run_id else None,
+        "decision_id": str(decision.id),
+        "invoice_id": str(invoice_id),
+        "ap_action": proposed,
+        "auditor_verdict": auditor_verdict or ("reject" if decision.requires_human_approval else "accept"),
+        "mira_action": decision.action,
+        "requires_human_approval": decision.requires_human_approval,
+        "disagreement": proposed != decision.action or auditor_verdict == "reject",
+        "replayed": True,
+    }
+
+
 def process_invoice(
     session: Session,
     snapshot: FinanceSnapshot,
@@ -88,6 +138,19 @@ def process_invoice(
     event: OfficeEvent | None = None,
 ) -> dict:
     """Event-driven AP packet: AP recommends, auditor reviews, Mira adjudicates."""
+    existing = existing_runtime_invoice_decision(session, snapshot.company_id, invoice_id)
+    if existing is not None:
+        packet = _packet_from_decision(session, existing, invoice_id)
+        if event is not None and existing.agent_run_id is not None:
+            attach_run(session, event, existing.agent_run_id)
+            finish_event(
+                session,
+                event,
+                OfficeEventStatus.AWAITING_HUMAN
+                if existing.requires_human_approval
+                else OfficeEventStatus.COMPLETED,
+            )
+        return packet
     if run is None:
         run = start_run(
             session,
@@ -174,13 +237,16 @@ def process_invoice(
     is_dup = bool(ap.artifact["duplicates"]["is_duplicate"])
     hours = _hours_for(final.action, is_dup, policy_blocked)
     dollars = Decimal("0.00")
-    category = SavingsCategory.INTAKE_HOURS
+    dollar_category = SavingsCategory.INTAKE_HOURS
+    savings_subject_id = invoice_id
     if is_dup:
+        dup_ids = (ap.artifact.get("duplicates") or {}).get("duplicate_invoice_ids") or []
+        savings_subject_id = duplicate_canonical_id(invoice_id, dup_ids)
         dollars = invoice.total
-        category = SavingsCategory.DUPLICATE_PREVENTED
+        dollar_category = SavingsCategory.DUPLICATE_PREVENTED
     elif policy_blocked and final.action in {"hold", "reject", "escalate"}:
         dollars = invoice.total
-        category = SavingsCategory.POLICY_BLOCK
+        dollar_category = SavingsCategory.POLICY_BLOCK
 
     decision = write_decision(
         session,
@@ -199,13 +265,13 @@ def process_invoice(
         subject_id=invoice_id,
         dollars_impact=dollars or None,
         hours_saved_estimate=hours,
-        status=DecisionStatus.AWAITING_HUMAN if final.requires_human_approval else DecisionStatus.EXECUTED,
+        status=decision_status_for_action(final.action, requires_human_approval=final.requires_human_approval),
     )
     write_savings(
         session,
         company_id=snapshot.company_id,
-        category=category,
-        amount_usd=dollars,
+        category=SavingsCategory.INTAKE_HOURS,
+        amount_usd=Decimal("0.00"),
         hours_saved=hours,
         workflow=WORKFLOW_INVOICE,
         period=_period(snapshot),
@@ -214,6 +280,20 @@ def process_invoice(
         related_object_id=invoice_id,
         note=final.explanation,
     )
+    if dollars:
+        write_savings(
+            session,
+            company_id=snapshot.company_id,
+            category=dollar_category,
+            amount_usd=dollars,
+            hours_saved=Decimal("0.00"),
+            workflow=WORKFLOW_INVOICE,
+            period=_period(snapshot),
+            run_id=run.id,
+            related_object_type="duplicate_group" if is_dup else "invoice",
+            related_object_id=savings_subject_id,
+            note=final.explanation,
+        )
     if event is not None:
         finish_event(
             session,
@@ -243,20 +323,21 @@ def handle_human_feedback(
     snapshot: FinanceSnapshot,
     message: str,
     *,
-    authorizer: str = "Elena Voss",
+    authorizer: str = "unauthenticated",
 ) -> dict:
+    """Record a comment. Never creates approval authority or pre-approval precedent."""
     event = record_event(
         session,
         company_id=snapshot.company_id,
         event_type=OfficeEventType.HUMAN_FEEDBACK_RECEIVED,
-        payload={"message": message},
+        payload={"message": message, "authorizer": authorizer},
     )
     run = start_run(
         session,
         company_id=snapshot.company_id,
         workflow_type="human_feedback",
         initiated_by=ActorType.USER,
-        plan={"message": message},
+        plan={"message": message, "authority_created": False},
     )
     attach_run(session, event, run.id)
     task = create_task(
@@ -264,51 +345,120 @@ def handle_human_feedback(
         run=run,
         destination=AgentRole.POLICY,
         originating=AgentRole.MIRA_CFO,
-        objective="Interpret human feedback into a typed precedent when the rule is machine-recognizable.",
+        objective="Store human feedback as a comment. Do not mint spend authority from free text.",
         input_payload={"message": message},
     )
     parsed = parse_human_feedback_precedent(message)
-    precedent_id = None
-    if parsed:
-        row = record_precedent(
-            session,
-            company_id=snapshot.company_id,
-            summary=parsed["summary"],
-            reusable_rule=parsed["reusable_rule"],
-            outcome=parsed["outcome"],
-            period=_period(snapshot),
-            scope=parsed["scope"],
-            authorizer=authorizer,
-            conditions=parsed["conditions"],
-        )
-        precedent_id = str(row.id)
-        complete_task(
-            session,
-            task,
-            status=AgentTaskStatus.COMPLETED,
-            result_type="Precedent",
-            result_payload={"precedent_id": precedent_id, **parsed},
-            confidence_score=Decimal("0.99"),
-            risk_level="low",
-        )
-        finish_run(session, run, AgentRunStatus.COMPLETED)
-        finish_event(session, event, OfficeEventStatus.COMPLETED)
-    else:
-        complete_task(
-            session,
-            task,
-            status=AgentTaskStatus.COMPLETED,
-            result_type="HumanFeedback",
-            result_payload={"stored": True, "precedent": False, "message": message},
-            confidence_score=Decimal("0.50"),
-            risk_level="medium",
-        )
-        finish_run(session, run, AgentRunStatus.COMPLETED)
-        finish_event(session, event, OfficeEventStatus.COMPLETED)
-    return {"run_id": str(run.id), "precedent_id": precedent_id, "parsed": parsed}
+    record_factual(
+        session,
+        company_id=snapshot.company_id,
+        statement=message.strip(),
+        fact_key="human_feedback.comment",
+        subject_type="feedback",
+        fact_value={"message": message, "authorizer": authorizer, "parsed_but_not_authorized": bool(parsed)},
+        source="human_feedback",
+        as_of=snapshot.as_of,
+    )
+    parser_confidence = Confidence(
+        score=Decimal("0.99"),
+        basis="Free-text feedback is stored as a comment and cannot create precedent or spending authority.",
+    )
+    complete_task(
+        session,
+        task,
+        status=AgentTaskStatus.COMPLETED,
+        result_type="HumanFeedback",
+        result_payload={
+            "stored": True,
+            "precedent": False,
+            "authority_created": False,
+            "message": message,
+            "recognized_rule_shape": bool(parsed),
+            "confidence": parser_confidence.model_dump(mode="json"),
+        },
+        confidence_score=parser_confidence.score,
+        risk_level="low",
+    )
+    finish_run(session, run, AgentRunStatus.COMPLETED)
+    finish_event(session, event, OfficeEventStatus.COMPLETED)
+    return {
+        "run_id": str(run.id),
+        "precedent_id": None,
+        "parsed": parsed,
+        "authority_created": False,
+    }
+
+
+def teach_precedent(
+    session: Session,
+    snapshot: FinanceSnapshot,
+    actor: CanonicalActor,
+    *,
+    summary: str,
+    reusable_rule: str,
+    outcome: str,
+    scope: str,
+    vendor: str | None,
+    category: str | None,
+    amount_threshold: Decimal | str,
+    effective_date,
+    evidence: list[str],
+) -> dict:
+    row = authorize_precedent(
+        session,
+        company_id=snapshot.company_id,
+        actor=actor,
+        summary=summary,
+        reusable_rule=reusable_rule,
+        outcome=outcome,
+        period=_period(snapshot),
+        scope=scope,
+        vendor=vendor,
+        category=category,
+        amount_threshold=amount_threshold,
+        effective_date=effective_date,
+        evidence=evidence,
+    )
+    return {
+        "precedent_id": str(row.id),
+        "status": row.status,
+        "outcome": row.outcome,
+        "authorizer": row.authorizer,
+        "grants_exemption": row.status == "active" and row.outcome in {"pre_approved", "approved", "pre-approved", "preapproved"},
+    }
+
+
+def resolve_human_decision(
+    session: Session,
+    *,
+    decision_id: UUID,
+    actor: CanonicalActor,
+    approved: bool,
+    comment: str | None = None,
+) -> dict:
+    if not actor.can_resolve_approvals:
+        raise PermissionError(f"{actor.name} is not authorized to resolve approvals.")
+    decision = resolve_decision(
+        session,
+        decision_id=decision_id,
+        actor_user_id=actor.user_id,
+        actor_name=actor.name,
+        approved=approved,
+        comment=comment,
+    )
+    return {
+        "decision_id": str(decision.id),
+        "status": decision.status,
+        "action": decision.action,
+        "payment_executed": False,
+        "actor": actor.name,
+    }
 
 
 def handle_month_end(session: Session, snapshot: FinanceSnapshot, *, period: str = CLOSE_PERIOD) -> CloseWorkflowStatus:
+    existing = close_status(session, snapshot.company_id, period)
+    if existing is not None:
+        return existing
     event = record_event(
         session,
         company_id=snapshot.company_id,
@@ -326,9 +476,10 @@ def handle_month_end(session: Session, snapshot: FinanceSnapshot, *, period: str
 
 def overnight_review(session: Session, snapshot: FinanceSnapshot, *, limit: int = 12) -> dict:
     """Command-center overnight work: invoices that still need a Mira decision."""
+    workflow_key = overnight_workflow_type(snapshot.as_of)
     existing = (
         session.query(AgentRun)
-        .filter(AgentRun.company_id == snapshot.company_id, AgentRun.workflow_type == WORKFLOW_OVERNIGHT)
+        .filter(AgentRun.company_id == snapshot.company_id, AgentRun.workflow_type == workflow_key)
         .first()
     )
     if existing is not None:
@@ -341,7 +492,7 @@ def overnight_review(session: Session, snapshot: FinanceSnapshot, *, limit: int 
     run = start_run(
         session,
         company_id=snapshot.company_id,
-        workflow_type=WORKFLOW_OVERNIGHT,
+        workflow_type=workflow_key,
         initiated_by=ActorType.MIRA,
         plan={"limit": limit},
     )
@@ -353,8 +504,14 @@ def overnight_review(session: Session, snapshot: FinanceSnapshot, *, limit: int 
         ),
         key=lambda inv: (0 if inv.is_duplicate_suspect else 1, inv.invoice_number),
     )
+    unhandled = [
+        inv
+        for inv in interesting
+        if existing_runtime_invoice_decision(session, snapshot.company_id, inv.id) is None
+    ]
+    queued = unhandled + [inv for inv in interesting if inv not in unhandled]
     processed = []
-    for invoice in interesting[:limit]:
+    for invoice in queued[:limit]:
         event = record_event(
             session,
             company_id=snapshot.company_id,
@@ -379,24 +536,11 @@ def overnight_review(session: Session, snapshot: FinanceSnapshot, *, limit: int 
         result_type=treasury.artifact_type,
         result_payload=treasury.artifact,
         tool_calls=treasury.artifact.get("tool_calls") or [],
-        confidence_score=Decimal("0.99"),
-        risk_level="low",
+        confidence_score=Decimal(str(treasury.artifact["cash"]["confidence"]["score"])),
+        risk_level=tool_assess_risk(snapshot).max_risk_level.value,
     )
     persist_result(session, snapshot.company_id, _cached_risk(snapshot), now())
     awaiting = any(row["requires_human_approval"] for row in processed)
-    write_savings(
-        session,
-        company_id=snapshot.company_id,
-        category=SavingsCategory.INTAKE_HOURS,
-        amount_usd=Decimal("0.00"),
-        hours_saved=Decimal("6.50"),
-        workflow="runtime.overnight_review",
-        period=_period(snapshot),
-        run_id=run.id,
-        related_object_type="agent_run",
-        related_object_id=run.id,
-        note=f"Intake/coding hours returned by processing {len(processed)} invoices overnight.",
-    )
     finish_run(session, run, AgentRunStatus.AWAITING_HUMAN if awaiting else AgentRunStatus.COMPLETED)
     return {"run_id": str(run.id), "processed": processed, "skipped": False}
 
@@ -448,8 +592,8 @@ def handle_event(
             result_type=result.artifact_type,
             result_payload=result.artifact,
             tool_calls=result.artifact.get("tool_calls") or [],
-            confidence_score=Decimal("0.90"),
-            risk_level="low",
+            confidence_score=Decimal(str(result.artifact["cash"]["confidence"]["score"])),
+            risk_level=tool_assess_risk(snapshot).max_risk_level.value,
         )
     finish_run(session, run, AgentRunStatus.COMPLETED)
     finish_event(session, event, OfficeEventStatus.COMPLETED)
@@ -475,11 +619,22 @@ def executive_request(session: Session, snapshot: FinanceSnapshot, request: str)
         input_payload={"request": request},
     )
     artifact: dict = {"request": request}
-    if "month-end" in text or "month end" in text or "blocking" in text:
-        status = close_status(session, snapshot.company_id) or handle_month_end(session, snapshot)
+    if (
+        "month-end" in text
+        or "month end" in text
+        or "blocking" in text
+        or "close status" in text
+        or (("september" in text or "october" in text) and "status" in text)
+        or "close for" in text
+    ):
+        period = parse_close_period(request)
+        status = close_status(session, snapshot.company_id, period) or handle_month_end(
+            session, snapshot, period=period
+        )
         artifact["kind"] = "close_status"
         artifact["close"] = status.model_dump(mode="json")
-        headline = f"Month-end close is {status.completion_pct} complete."
+        artifact["period"] = period
+        headline = f"{period} close is {status.completion_pct} complete."
         body = (
             f"Completed {len(status.completed)}; blocked {len(status.blocked)}: {', '.join(status.blocked) or 'none'}."
         )
@@ -489,19 +644,15 @@ def executive_request(session: Session, snapshot: FinanceSnapshot, request: str)
         artifact["fpna"] = fpna.artifact
         headline = "Hiring scenario from deterministic cash, AR, AP, and payroll assumptions."
         body = fpna.explanation
-    elif "aws" in text and "variance" in text:
-        aws = next((v for v in snapshot.vendors if "aws" in v.name.lower() or "amazon web" in v.name.lower()), None)
-        invoices = [i for i in snapshot.ap_invoices() if aws and i.vendor_id == aws.id]
-        packets = []
-        for inv in invoices:
-            packets.append(process_invoice(session, snapshot, inv.id, run=run))
-        artifact["kind"] = "aws_variance"
-        artifact["packets"] = packets
-        headline = f"Investigated {len(packets)} AWS invoices with AP, auditor, and Mira adjudication."
-        body = "Amounts and risk scores come from engines, not from this sentence."
-    elif "approval" in text or "payment" in text:
-        from mira.core.models import Decision
+    elif "aws" in text and any(token in text for token in ("increase", "why", "spend", "variance")):
+        from mira.agents.openai_runtime import run_aws_spend_investigation
 
+        investigation = run_aws_spend_investigation(snapshot, request)
+        artifact["kind"] = "aws_spend_investigation"
+        artifact["investigation"] = investigation
+        headline = investigation["headline"]
+        body = investigation["explanation"]
+    elif "approval" in text or "payment" in text:
         pending = (
             session.query(Decision)
             .filter(
@@ -530,22 +681,25 @@ def executive_request(session: Session, snapshot: FinanceSnapshot, request: str)
         artifact["cash"] = cash.model_dump(mode="json")
         headline = "Overnight finance review is on the command center."
         body = cash.explanation
+    live = load_snapshot(session, snapshot.company_id, snapshot.as_of)
+    cash = tool_get_cash_position(live)
+    risk = tool_assess_risk(live)
     complete_task(
         session,
         intake,
         status=AgentTaskStatus.COMPLETED,
         result_type="ExecutiveRequest",
         result_payload=artifact,
-        confidence_score=Decimal("0.90"),
-        risk_level="low",
+        confidence_score=cash.confidence.score,
+        risk_level=risk.max_risk_level.value,
     )
     rec = CFORecommendation(
         headline=headline,
         body=body,
         action=artifact.get("kind", "review"),
         priority="action",
-        confidence=cash_confidence(),
-        risk_level=tool_assess_risk(snapshot).max_risk_level,
+        confidence=cash.confidence,
+        risk_level=risk.max_risk_level,
         policy_basis="Executive request API maps onto typed tasks; it does not execute live payments.",
         authority_basis=mira_authority(),
         evidence=[],
@@ -561,12 +715,6 @@ def executive_request(session: Session, snapshot: FinanceSnapshot, request: str)
     }
 
 
-def cash_confidence():
-    from mira.core.agent_outputs import Confidence
-
-    return Confidence(score=Decimal("0.90"), basis="Request routed to deterministic tools.")
-
-
 def mira_authority():
     from mira.core.agent_outputs import AuthorityBasis
 
@@ -579,8 +727,9 @@ def mira_authority():
 
 def command_center_briefing_data(session: Session, snapshot: FinanceSnapshot) -> dict:
     overnight_review(session, snapshot)
-    if close_status(session, snapshot.company_id) is None:
-        handle_month_end(session, load_snapshot(session, snapshot.company_id, snapshot.as_of))
+    period = _period(snapshot)
+    if close_status(session, snapshot.company_id, period) is None:
+        handle_month_end(session, load_snapshot(session, snapshot.company_id, snapshot.as_of), period=period)
     session.flush()
     live = load_snapshot(session, snapshot.company_id, snapshot.as_of)
     runtime_savings = [s for s in live.savings if s.source == "runtime"]
@@ -619,7 +768,7 @@ def command_center_briefing_data(session: Session, snapshot: FinanceSnapshot) ->
             Payment.company_id == live.company_id, Payment.status.in_({"failed", "void"})
         )
     )
-    close = close_status(session, live.company_id)
+    close = close_status(session, live.company_id, period)
     if protected == 0 and hours == 0:
         headline = "I have not yet recorded workflow impact. Overnight intake is on the board as zeros until engines write SavingsEvent rows."
         narrative = (
@@ -633,7 +782,7 @@ def command_center_briefing_data(session: Session, snapshot: FinanceSnapshot) ->
         )
         narrative = (
             f"Operating cash {cash.cash.amount}. Open AP {cash.open_ap.amount}. "
-            f"Reconciliation rate {recon}. Autonomous completion {metrics.autonomy_score}. "
+            f"Reconciliation rate {recon}. Autonomous completion {metrics.autonomous_completion_rate}. "
             "Every number is engine- or workflow-authored."
         )
     return {
@@ -645,7 +794,7 @@ def command_center_briefing_data(session: Session, snapshot: FinanceSnapshot) ->
         "dollars_saved": saved,
         "hours_saved": hours,
         "reconciliation_rate": recon,
-        "autonomous_completion_rate": metrics.autonomy_score,
+        "autonomous_completion_rate": metrics.autonomous_completion_rate,
         "open_incidents": int(incidents or 0),
         "blocked_payments": int(blocked_payments or 0),
         "pending_approvals": len(pending),

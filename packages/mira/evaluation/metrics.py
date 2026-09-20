@@ -91,9 +91,11 @@ def compute_metrics(
     hours = sum((row.hours_saved for row in snapshot.savings), Decimal("0.00"))
 
     decisions = snapshot.decisions
-    completed = Decimal(len([d for d in decisions if d.status in {"executed", "approved", "rejected"}]))
+    auto_done = {"evaluated", "proposed", "executed"}
+    completed_statuses = auto_done | {"approved", "rejected"}
+    completed = Decimal(len([d for d in decisions if d.status in completed_statuses]))
     auto_completed = Decimal(
-        len([d for d in decisions if d.status == "executed" and not d.requires_human_approval])
+        len([d for d in decisions if d.status in auto_done and not d.requires_human_approval])
     )
     escalated = Decimal(len([d for d in decisions if d.requires_human_approval]))
     tasks_completed = Decimal(len(decisions)) if decisions else completed

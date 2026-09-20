@@ -205,6 +205,23 @@ def complete_task(
     return task
 
 
+def existing_runtime_invoice_decision(
+    session: Session, company_id: UUID, invoice_id: UUID
+) -> Decision | None:
+    """Return the first runtime invoice Decision for this subject, if any."""
+    return (
+        session.query(Decision)
+        .filter(
+            Decision.company_id == company_id,
+            Decision.decision_type == "invoice",
+            Decision.subject_type == "invoice",
+            Decision.subject_id == invoice_id,
+        )
+        .order_by(Decision.created_at.asc())
+        .first()
+    )
+
+
 def write_decision(
     session: Session,
     *,
@@ -228,7 +245,7 @@ def write_decision(
     decided = (
         status
         if status is not None
-        else (DecisionStatus.AWAITING_HUMAN if requires_human_approval else DecisionStatus.EXECUTED)
+        else (DecisionStatus.AWAITING_HUMAN if requires_human_approval else DecisionStatus.EVALUATED)
     )
     row = Decision(
         id=uuid4(),
@@ -388,3 +405,65 @@ def trace_for_decision(session: Session, decision_id: UUID) -> list[dict]:
             ],
         }
     ]
+
+
+def decision_status_for_action(action: str, *, requires_human_approval: bool) -> DecisionStatus:
+    """Lifecycle: evaluation is not execution. EXECUTED is reserved for a real payment rail."""
+    if requires_human_approval:
+        return DecisionStatus.AWAITING_HUMAN
+    if action == "pay":
+        return DecisionStatus.PROPOSED
+    return DecisionStatus.EVALUATED
+
+
+def resolve_decision(
+    session: Session,
+    *,
+    decision_id: UUID,
+    actor_user_id: UUID,
+    actor_name: str,
+    approved: bool,
+    comment: str | None = None,
+) -> Decision:
+    """Approve or reject an awaiting decision. Does not mark money as moved."""
+    decision = session.get(Decision, decision_id)
+    if decision is None:
+        raise KeyError(decision_id)
+    if decision.status not in {
+        DecisionStatus.AWAITING_HUMAN.value,
+        DecisionStatus.PROPOSED.value,
+        DecisionStatus.EVALUATED.value,
+    }:
+        raise ValueError(f"Decision {decision_id} is not resolvable from status {decision.status}.")
+    decision.status = DecisionStatus.APPROVED.value if approved else DecisionStatus.REJECTED.value
+    decision.requires_human_approval = False
+    approval = (
+        session.query(Approval)
+        .filter(Approval.decision_id == decision.id)
+        .order_by(Approval.created_at.desc())
+        .first()
+    )
+    if approval is not None:
+        approval.status = ApprovalStatus.APPROVED.value if approved else ApprovalStatus.REJECTED.value
+        approval.approver_user_id = actor_user_id
+        approval.decided_at = now()
+        approval.comment = comment
+    session.flush()
+    write_audit(
+        session,
+        company_id=decision.company_id,
+        event_type="decision_approved" if approved else "decision_rejected",
+        actor_type=ActorType.USER,
+        actor_id=str(actor_user_id),
+        object_type="decision",
+        object_id=decision.id,
+        correlation_id=decision.agent_run_id,
+        payload={
+            "actor": actor_name,
+            "approved": approved,
+            "comment": comment,
+            "next_status": decision.status,
+            "payment_executed": False,
+        },
+    )
+    return decision

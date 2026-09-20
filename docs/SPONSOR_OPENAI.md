@@ -9,7 +9,16 @@ This is not a "powered by OpenAI" sticker. Mira's planner is wired to the **Open
 - **Mira** — master planner with `handoffs` to specialists
 - **AP/AR, Treasury, Controller, Auditor, FP&A** — each an `Agent` with the same deterministic tool list
 
-When `OPENAI_API_KEY` is set **and** the `openai-agents` package is installed, those `Agent` objects are the SDK types (`agents.Agent`, `@function_tool`, `handoffs`). Tests and CI execute the **same tools** through `mira.agents.runtime` so finance truth never depends on a live model.
+When `OPENAI_API_KEY` is set **and** the `openai-agents` package is installed, `run_aws_spend_investigation` constructs a Mira `Agent` with snapshot-bound tools and calls `agents.Runner.run_sync`.
+
+**Endpoint:** `POST /api/v1/executive/request` with `"Why did September AWS spend increase?"`  
+**Alias:** `POST /api/v1/executive/investigate`
+
+**Path:** executive request → `mira.agents.openai_runtime.run_aws_spend_investigation` → `Runner.run_sync(Mira, bound tools)` → `collect_aws_spend_evidence` / `tool_get_cash_position` → model explains those results.
+
+Without `OPENAI_API_KEY` or on provider failure, the same ledger evidence is returned by a deterministic fallback. Tests mock `Runner.run_sync` at the provider boundary.
+
+The model may choose tools, organize investigation, and explain deterministic results. It may not invent calculations, official risk, policy, authority, execution, or evidence.
 
 ## Tools the agents call
 

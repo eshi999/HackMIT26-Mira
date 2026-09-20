@@ -25,6 +25,47 @@ from mira.finance.snapshot import FinanceSnapshot, load_snapshot
 
 CLOSE_PERIOD = "2026-09"
 
+
+def close_workflow_type(period: str) -> str:
+    return f"month_end_close:{period}"
+
+
+def parse_close_period(text: str, default: str = CLOSE_PERIOD) -> str:
+    lowered = text.lower()
+    if "2026-10" in lowered or "october" in lowered:
+        return "2026-10"
+    if "2026-09" in lowered or "september" in lowered:
+        return "2026-09"
+    return default
+
+
+def _in_close_period(invoice, period: str) -> bool:
+    if invoice.posted_period:
+        return invoice.posted_period == period
+    return f"{invoice.issue_date.year:04d}-{invoice.issue_date.month:02d}" == period
+
+
+def _scores_from_artifact(artifact: object) -> tuple[Decimal | None, str | None]:
+    """Copy engine/tool confidence and risk out of a specialist artifact. Never invent."""
+    if not isinstance(artifact, dict):
+        return None, None
+    candidates: list[dict] = [artifact]
+    for key in ("decision", "verdict", "cash", "aging"):
+        nested = artifact.get(key)
+        if isinstance(nested, dict):
+            candidates.append(nested)
+    confidence = None
+    risk = None
+    for row in candidates:
+        conf = row.get("confidence")
+        if confidence is None and isinstance(conf, dict) and conf.get("score") is not None:
+            confidence = Decimal(str(conf["score"]))
+        if risk is None and row.get("risk_level"):
+            risk = str(row["risk_level"])
+        if risk is None and row.get("max_risk_level"):
+            risk = str(row["max_risk_level"])
+    return confidence, risk
+
 CLOSE_NODES: tuple[tuple[str, str, AgentRole, tuple[str, ...]], ...] = (
     ("document_readiness", "Document readiness", AgentRole.CONTROLLER, ()),
     ("ap_close", "AP close", AgentRole.ACCOUNTS_PAYABLE, ("document_readiness",)),
@@ -85,7 +126,7 @@ def execute_close(
     run = start_run(
         session,
         company_id=snapshot.company_id,
-        workflow_type="month_end_close",
+        workflow_type=close_workflow_type(period),
         initiated_by=ActorType.SYSTEM,
         plan={
             "period": period,
@@ -130,8 +171,6 @@ def execute_close(
                     status=AgentTaskStatus.FAILED,
                     result_type="CloseTask",
                     result_payload={"key": key, "error": reasons[key]},
-                    confidence_score=Decimal("0.99"),
-                    risk_level="medium",
                 )
                 continue
             artifact, explanation, ok = _run_node(snapshot, key, period)
@@ -139,14 +178,15 @@ def execute_close(
             status[key] = st
             if not ok:
                 reasons[key] = explanation
+            confidence, risk = _scores_from_artifact(artifact)
             complete_task(
                 session,
                 tasks[key],
                 status=st,
                 result_type="CloseTask",
                 result_payload={"key": key, "title": title, "specialist": role.value, "artifact": dump(artifact)},
-                confidence_score=Decimal("0.90"),
-                risk_level="low" if ok else "high",
+                confidence_score=confidence,
+                risk_level=risk if ok else (risk or "high"),
             )
         if not progressed:
             for key in list(remaining):
@@ -158,8 +198,6 @@ def execute_close(
                     status=AgentTaskStatus.BLOCKED,
                     result_type="CloseTask",
                     result_payload={"key": key, "blocker": reasons[key]},
-                    confidence_score=Decimal("0.99"),
-                    risk_level="medium",
                 )
                 remaining.remove(key)
 
@@ -171,9 +209,14 @@ def execute_close(
         for d in session.query(Decision).filter(
             Decision.company_id == snapshot.company_id,
             Decision.requires_human_approval.is_(True),
-            Decision.status.in_({"awaiting_human", "proposed"}),
+            Decision.status.in_({"awaiting_human", "proposed", "evaluated"}),
         )
     ]
+    if human:
+        if pct >= Decimal("1.00"):
+            pct = Decimal("0.99")
+        if "outstanding_human_decisions" not in blocked:
+            blocked = [*blocked, "outstanding_human_decisions"]
     finish_run(
         session,
         run,
@@ -205,9 +248,14 @@ def execute_close(
 
 def _run_node(snapshot: FinanceSnapshot, key: str, period: str) -> tuple[object, str, bool]:
     if key == "document_readiness":
-        missing = [inv.invoice_number for inv in snapshot.invoices if inv.document_id is None]
+        missing = [
+            inv.invoice_number
+            for inv in snapshot.invoices
+            if _in_close_period(inv, period) and inv.document_id is None
+        ]
         ctrl = run_controller_specialist(snapshot, period)
-        return ctrl.artifact, f"Missing documents: {missing or 'none'}.", True
+        ok = not missing
+        return ctrl.artifact, f"Missing documents: {missing or 'none'}.", ok
     if key == "ap_close":
         open_ap = [inv for inv in snapshot.ap_invoices() if inv.status in {"received", "needs_review"}]
         sample = open_ap[0] if open_ap else snapshot.ap_invoices()[0]
@@ -219,7 +267,12 @@ def _run_node(snapshot: FinanceSnapshot, key: str, period: str) -> tuple[object,
     if key == "bank_reconciliation":
         result = run_treasury_specialist(snapshot)
         recon = tool_reconcile_period(snapshot)
-        return result.artifact, f"Bank recon rate {recon.reconciliation_rate}.", True
+        ok = len(recon.unresolved) == 0
+        return (
+            result.artifact,
+            f"Bank recon rate {recon.reconciliation_rate}; unresolved {len(recon.unresolved)}.",
+            ok,
+        )
     if key == "payroll_readiness":
         gusto = next((v for v in snapshot.vendors if "gusto" in v.name.lower()), None)
         payroll = [inv for inv in snapshot.ap_invoices() if gusto and inv.vendor_id == gusto.id]
@@ -234,7 +287,8 @@ def _run_node(snapshot: FinanceSnapshot, key: str, period: str) -> tuple[object,
         open_ap = [inv for inv in snapshot.ap_invoices() if inv.status == "needs_review"]
         if open_ap:
             auditor = run_auditor_specialist(snapshot, open_ap[0].id, "pay")
-            return auditor.artifact, auditor.explanation, True
+            rejected = bool(auditor.artifact.get("verdict", {}).get("rejected"))
+            return auditor.artifact, auditor.explanation, not rejected
         return {"findings": len(risk.result.findings)}, risk.explanation, True
     if key == "variance_analysis":
         fpna = run_fpna_specialist(snapshot)
@@ -248,7 +302,7 @@ def _run_node(snapshot: FinanceSnapshot, key: str, period: str) -> tuple[object,
 def close_status(session: Session, company_id: UUID, period: str = CLOSE_PERIOD) -> CloseWorkflowStatus | None:
     run = (
         session.query(AgentRun)
-        .filter(AgentRun.company_id == company_id, AgentRun.workflow_type == "month_end_close")
+        .filter(AgentRun.company_id == company_id, AgentRun.workflow_type == close_workflow_type(period))
         .order_by(AgentRun.started_at.desc())
         .first()
     )
@@ -268,9 +322,14 @@ def close_status(session: Session, company_id: UUID, period: str = CLOSE_PERIOD)
         for d in session.query(Decision).filter(
             Decision.company_id == company_id,
             Decision.requires_human_approval.is_(True),
-            Decision.status.in_({"awaiting_human", "proposed"}),
+            Decision.status.in_({"awaiting_human", "proposed", "evaluated"}),
         )
     ]
+    if human:
+        if pct >= Decimal("1.00"):
+            pct = Decimal("0.99")
+        if "outstanding_human_decisions" not in blocked:
+            blocked = [*blocked, "outstanding_human_decisions"]
     return CloseWorkflowStatus(
         period=period,
         completion_pct=pct,

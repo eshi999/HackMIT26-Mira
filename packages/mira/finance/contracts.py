@@ -36,26 +36,36 @@ class ContractInvoiceComparison(BaseModel):
 
     contract_id: UUID
     invoice_id: UUID
-    expected_price: Money
+    expected_price: Money | None
     actual_price: Money
-    increase_pct: Decimal
-    allowed_increase_pct: Decimal
-    years_elapsed: Decimal
-    is_violation: bool
+    increase_pct: Decimal | None
+    allowed_increase_pct: Decimal | None
+    years_elapsed: Decimal | None
+    is_violation: bool | None
+    is_complete: bool = True
+    status: str = "pass"
     confidence: Confidence
     evidence: list[EvidenceReference] = Field(default_factory=list)
     explanation: str
 
 
-def facts_from_extracted(extracted_terms: dict, *, fallback_price: Money | None = None) -> ContractFacts:
-    """Map structured extracted_terms JSON onto ContractFacts. Not NLP."""
+def facts_from_extracted(extracted_terms: dict, *, fallback_price: Money | None = None) -> ContractFacts | None:
+    """Map structured extracted_terms JSON onto ContractFacts. Not NLP.
+
+    Never infer agreed_price from the invoice under test. `fallback_price` is
+    rejected for that reason and ignored.
+    """
+    del fallback_price
+    if not extracted_terms:
+        return None
     price_raw = extracted_terms.get("agreed_price", extracted_terms.get("agreed_price_amount"))
-    if price_raw is None and fallback_price is not None:
-        price = fallback_price
-    else:
-        currency = str(extracted_terms.get("currency", fallback_price.currency if fallback_price else "USD"))
-        price = Money(amount=quantize_money(price_raw), currency=currency)
-    increase = extracted_terms.get("allowed_annual_increase_pct", extracted_terms.get("allowed_annual_increase", 0))
+    if price_raw is None:
+        return None
+    currency = str(extracted_terms.get("currency", "USD"))
+    price = Money(amount=quantize_money(price_raw), currency=currency)
+    increase = extracted_terms.get("allowed_annual_increase_pct", extracted_terms.get("allowed_annual_increase"))
+    if increase is None:
+        return None
     basis = extracted_terms.get("price_basis_date")
     renewal = extracted_terms.get("renewal_date")
     return ContractFacts(
@@ -140,6 +150,8 @@ def compare_invoice_to_contract(
         allowed_increase_pct=facts.allowed_annual_increase_pct,
         years_elapsed=years,
         is_violation=is_violation,
+        is_complete=True,
+        status="violation" if is_violation else "pass",
         confidence=confidence,
         evidence=evidence,
         explanation=explanation,
