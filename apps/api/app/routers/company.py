@@ -12,6 +12,7 @@ from mira.core.models import (
     Company,
     Decision,
     Document,
+    Evidence,
     ExternalSignal,
     Finding,
     Invoice,
@@ -42,6 +43,37 @@ def _require_northstar(db: Session) -> Company:
     return company
 
 
+def _document_lineage(doc: Document, evidence_by_uri: dict[str, Evidence]) -> tuple[str, str | None]:
+    origin = (
+        "Dropbox live"
+        if doc.storage_backend == "dropbox"
+        else "Dropbox-shaped local inbox"
+    )
+    linked = evidence_by_uri.get(doc.storage_uri)
+    evidence_title = linked.title if linked else None
+    locator = linked.uri if linked and linked.uri else doc.storage_uri
+    lineage = f"{origin} → Document({doc.document_class}) → {locator}"
+    if evidence_title:
+        lineage = f"{lineage} · evidence: {evidence_title}"
+    return lineage, evidence_title
+
+
+def _brief_document(doc: Document, evidence_by_uri: dict[str, Evidence]) -> DocumentBrief:
+    lineage, evidence_title = _document_lineage(doc, evidence_by_uri)
+    return DocumentBrief(
+        id=doc.id,
+        filename=doc.filename,
+        document_class=doc.document_class,
+        storage_backend=doc.storage_backend,
+        storage_uri=doc.storage_uri,
+        content_hash=doc.content_hash,
+        extraction_status=doc.extraction_status,
+        ingested_at=doc.ingested_at,
+        lineage=lineage,
+        evidence_title=evidence_title,
+    )
+
+
 @router.get("/company", response_model=CompanyOut)
 def get_company(db: Session = Depends(get_db)) -> Company:
     return _require_northstar(db)
@@ -65,6 +97,8 @@ def get_briefing(db: Session = Depends(get_db)) -> BriefingOut:
     vendors = {v.id: v.name for v in db.scalars(select(Vendor).where(Vendor.company_id == cid))}
     signals = db.scalars(select(ExternalSignal).where(ExternalSignal.company_id == cid)).all()
     documents = db.scalars(select(Document).where(Document.company_id == cid)).all()
+    evidence_rows = db.scalars(select(Evidence).where(Evidence.company_id == cid)).all()
+    evidence_by_uri = {row.uri: row for row in evidence_rows if row.uri}
 
     close = runtime.get("close")
     cash = runtime["cash"]
@@ -139,16 +173,7 @@ def get_briefing(db: Session = Depends(get_db)) -> BriefingOut:
             for s in signals
         ],
         documents_ingested=len(documents),
-        inbox=[
-            DocumentBrief(
-                id=d.id,
-                filename=d.filename,
-                document_class=d.document_class,
-                storage_backend=d.storage_backend,
-                storage_uri=d.storage_uri,
-            )
-            for d in documents
-        ],
+        inbox=[_brief_document(d, evidence_by_uri) for d in documents],
         autonomous_completion_rate=Decimal(runtime["autonomous_completion_rate"]),
         reconciliation_rate=Decimal(runtime["reconciliation_rate"]),
         open_incidents=int(runtime["open_incidents"]),

@@ -139,7 +139,8 @@ def evaluate(snapshot: FinanceSnapshot) -> dict:
     }
 
 
-def main() -> None:
+def evaluate_fresh_seed() -> dict:
+    """Paired measurement on a fresh in-memory Northstar seed (same as `make token-eval`)."""
     engine = create_engine("sqlite:///:memory:")
     try:
         Base.metadata.create_all(engine)
@@ -147,9 +148,21 @@ def main() -> None:
             company = seed_northstar(session)
             session.flush()
             snapshot = load_snapshot(session, company.id, AS_OF.date())
-            print(json.dumps(evaluate(snapshot), indent=2))
+            report = evaluate(snapshot)
+        scenarios = report.get("scenarios") or []
+        return {
+            **report,
+            "source": "make token-eval",
+            "read_only": True,
+            "scenario_count": len(scenarios),
+            "correctness_retained_label": f"{len(scenarios)}/{len(scenarios)}" if scenarios else "0/0",
+        }
     finally:
         engine.dispose()
+
+
+def main() -> None:
+    print(json.dumps(evaluate_fresh_seed(), indent=2))
 
 
 if __name__ == "__main__":

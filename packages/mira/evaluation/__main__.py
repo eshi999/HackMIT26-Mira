@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from mira.core.db import create_schema, get_engine, get_sessionmaker, reset_engine
 from mira.evaluation.harness import print_report, run_precedent_evaluation
 from mira.seed.northstar import AS_OF, seed_northstar
@@ -9,6 +11,10 @@ from mira.seed.northstar import AS_OF, seed_northstar
 
 def main() -> None:
     reset_engine()
+    Path("data").mkdir(exist_ok=True)
+    eval_db = Path("data/mira-eval.db")
+    if eval_db.exists():
+        eval_db.unlink()
     url = "sqlite:///./data/mira-eval.db"
     engine = get_engine(url)
     create_schema(engine)

@@ -61,6 +61,60 @@ export type DocumentBrief = {
   document_class: string;
   storage_backend: string;
   storage_uri: string;
+  content_hash?: string | null;
+  extraction_status?: string | null;
+  ingested_at?: string | null;
+  lineage?: string | null;
+  evidence_title?: string | null;
+};
+
+export type EvidenceHit = {
+  object_type: string;
+  object_id: string | null;
+  title: string;
+  snippet: string | null;
+  source_system: string;
+};
+
+export type EvidenceSearch = {
+  query: string;
+  retrieval_source: string;
+  hit_count: number;
+  explanation: string;
+  hits: EvidenceHit[];
+};
+
+export type PrecedentRow = {
+  id: string;
+  summary: string;
+  outcome: string;
+  scope: string;
+  status: string;
+  authorizer: string | null;
+  reusable_rule: string | null;
+  conditions: Record<string, unknown> | null;
+  period: string;
+};
+
+export type ExecutiveResult = {
+  run_id: string;
+  request: string;
+  kind: string;
+  recommendation: { headline: string; body: string };
+  artifact: Record<string, unknown>;
+  transcript?: string;
+  voice_output_available?: boolean;
+};
+
+export type MeasuredContext = {
+  tokens_avoided: number;
+  reduction_percent: string;
+  correctness_retained: boolean;
+  scenario_count: number;
+  correctness_retained_label: string;
+  baseline: { estimated_input_tokens: number };
+  optimized: { estimated_input_tokens: number };
+  source?: string;
 };
 
 export type Briefing = {
@@ -99,6 +153,14 @@ export type Briefing = {
 };
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const TOKEN = process.env.NEXT_PUBLIC_MIRA_DEMO_TOKEN ?? "mira-demo-elena";
+
+function authHeaders(json = false): HeadersInit {
+  return {
+    Authorization: `Bearer ${TOKEN}`,
+    ...(json ? { "Content-Type": "application/json" } : {}),
+  };
+}
 
 export async function fetchBriefing(): Promise<Briefing | null> {
   try {
@@ -115,15 +177,11 @@ export async function resolveDecision(
   resolution: "approve" | "reject",
   comment?: string,
 ): Promise<Record<string, unknown> | null> {
-  const token = process.env.NEXT_PUBLIC_MIRA_DEMO_TOKEN ?? "mira-demo-elena";
   try {
     const res = await fetch(`${API}/api/v1/decisions/${decisionId}/resolve`, {
       method: "POST",
       cache: "no-store",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
+      headers: authHeaders(true),
       body: JSON.stringify({ resolution, comment: comment ?? null }),
     });
     if (!res.ok) return null;
@@ -136,6 +194,138 @@ export async function resolveDecision(
 export async function fetchMeta(): Promise<Record<string, unknown> | null> {
   try {
     const res = await fetch(`${API}/api/v1/meta`, { cache: "no-store" });
+    if (!res.ok) return null;
+    return (await res.json()) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+export async function postExecutiveRequest(request: string): Promise<ExecutiveResult | null> {
+  try {
+    const res = await fetch(`${API}/api/v1/executive/request`, {
+      method: "POST",
+      cache: "no-store",
+      headers: authHeaders(true),
+      body: JSON.stringify({ request }),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as ExecutiveResult;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchVoiceStatus(): Promise<{ stt: string; tts: string } | null> {
+  try {
+    const res = await fetch(`${API}/api/v1/voice/status`, { cache: "no-store" });
+    if (!res.ok) return null;
+    return (await res.json()) as { stt: string; tts: string };
+  } catch {
+    return null;
+  }
+}
+
+export async function postVoiceRequest(audio: Blob): Promise<ExecutiveResult | { error: string }> {
+  const body = new FormData();
+  body.append("audio", audio, "clip.webm");
+  try {
+    const res = await fetch(`${API}/api/v1/voice/request`, {
+      method: "POST",
+      cache: "no-store",
+      headers: { Authorization: `Bearer ${TOKEN}` },
+      body,
+    });
+    if (res.status === 503) {
+      const payload = (await res.json()) as { detail?: string };
+      return { error: payload.detail ?? "Deepgram is unavailable. Type the request instead." };
+    }
+    if (!res.ok) return { error: "Voice request failed. Type the request instead." };
+    return (await res.json()) as ExecutiveResult;
+  } catch {
+    return { error: "Voice request failed. Type the request instead." };
+  }
+}
+
+export async function speakMiraResult(text: string): Promise<Blob | null> {
+  try {
+    const res = await fetch(`${API}/api/v1/voice/speak`, {
+      method: "POST",
+      cache: "no-store",
+      headers: authHeaders(true),
+      body: JSON.stringify({ text, source: "mira_result" }),
+    });
+    if (!res.ok) return null;
+    return await res.blob();
+  } catch {
+    return null;
+  }
+}
+
+export async function searchEvidence(query: string): Promise<EvidenceSearch | null> {
+  try {
+    const res = await fetch(`${API}/api/v1/evidence/search?q=${encodeURIComponent(query)}`, {
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as EvidenceSearch;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchPrecedents(): Promise<PrecedentRow[]> {
+  try {
+    const res = await fetch(`${API}/api/v1/precedents`, { cache: "no-store" });
+    if (!res.ok) return [];
+    const body = (await res.json()) as { precedents: PrecedentRow[] };
+    return body.precedents ?? [];
+  } catch {
+    return [];
+  }
+}
+
+export async function authorizePrecedent(payload: {
+  summary: string;
+  reusable_rule: string;
+  outcome: string;
+  scope: string;
+  vendor: string;
+  category: string;
+  amount_threshold: string;
+  effective_date: string;
+  evidence: string[];
+}): Promise<Record<string, unknown> | null> {
+  try {
+    const res = await fetch(`${API}/api/v1/precedents/authorize`, {
+      method: "POST",
+      cache: "no-store",
+      headers: authHeaders(true),
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchMeasuredContext(): Promise<MeasuredContext | null> {
+  try {
+    const res = await fetch(`${API}/api/v1/context/measured`, {
+      cache: "no-store",
+      headers: authHeaders(),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as MeasuredContext;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchSpaceSignals(): Promise<Record<string, unknown> | null> {
+  try {
+    const res = await fetch(`${API}/api/v1/external-signals/space`, { cache: "no-store" });
     if (!res.ok) return null;
     return (await res.json()) as Record<string, unknown>;
   } catch {

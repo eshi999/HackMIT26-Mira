@@ -98,6 +98,11 @@ class DocumentBrief(BaseModel):
     document_class: str
     storage_backend: str
     storage_uri: str
+    content_hash: str | None = None
+    extraction_status: str | None = None
+    ingested_at: datetime | None = None
+    lineage: str | None = None
+    evidence_title: str | None = None
 
 
 class CashPosition(BaseModel):
