@@ -11,7 +11,6 @@ from mira.training.train_intent_router import (
     train_model,
 )
 
-
 EXPECTED_INTENTS = {
     "cash_position",
     "ap_ar",

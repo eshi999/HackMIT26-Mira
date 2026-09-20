@@ -11,7 +11,6 @@ def test_efficiency_requires_actor(client):
 def test_efficiency_is_read_only_and_reproducible(client, monkeypatch):
     from app.config import get_settings
 
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     Session = get_sessionmaker(get_settings().database_url)
 
     def counts():

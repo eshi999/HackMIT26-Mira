@@ -12,7 +12,6 @@ from mira.training.train_intent_router import (
     train_model,
 )
 
-
 MIN_CONFIDENCE = 0.35
 
 

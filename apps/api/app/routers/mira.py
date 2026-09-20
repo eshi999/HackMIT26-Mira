@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 from app.deps import get_actor, get_db
 from mira.agents.auth import CanonicalActor
 from mira.agents.close import close_status
-from mira.agents.openai_runtime import run_aws_spend_investigation
 from mira.agents.persist import trace_for_decision
 from mira.agents.runtime import (
     executive_request,
@@ -78,9 +77,9 @@ def post_executive_investigate(
     db: Session = Depends(get_db),
     _actor: CanonicalActor = Depends(get_actor),
 ) -> dict:
-    """Bounded OpenAI Agents SDK path: Why did September AWS spend increase?"""
+    """Compatibility alias for Mira's deterministic executive runtime."""
     _company, snapshot = _company_snapshot(db)
-    result = run_aws_spend_investigation(snapshot, body.request)
+    result = executive_request(db, snapshot, body.request)
     db.commit()
     return result
 

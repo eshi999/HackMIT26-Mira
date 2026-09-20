@@ -406,7 +406,7 @@ def test_optimization_environment_switch(snapshot, monkeypatch):
 def test_evaluation_reproducible_offline_without_any_provider(snapshot, monkeypatch):
     import httpx
 
-    for key in ("OPENAI_API_KEY", "TOKEN_COMPANY_API_KEY", "ELASTICSEARCH_API_KEY"):
+    for key in ("TOKEN_COMPANY_API_KEY", "ELASTICSEARCH_API_KEY"):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("ELASTICSEARCH_URL", "https://must-not-call.invalid")
 

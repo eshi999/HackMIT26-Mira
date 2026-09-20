@@ -4,8 +4,7 @@ The LLM may plan, investigate, interpret, delegate, explain, and choose tools.
 It may not invent financial arithmetic, reconciliation, risk, confidence, policy,
 savings, ledger values, approval authority, or contract calculations.
 
-This module is the deterministic executor those tools run through. The optional
-OpenAI Agents SDK planner lives in mira.agents.openai_runtime.
+This module is the deterministic executor for Mira's finance workflows.
 """
 
 from __future__ import annotations
@@ -39,6 +38,7 @@ from mira.agents.specialists import (
 )
 from mira.agents.tools import (
     _cached_risk,
+    collect_aws_spend_evidence,
     tool_assess_risk,
     tool_calculate_finance_metrics,
     tool_get_cash_position,
@@ -796,20 +796,34 @@ def executive_request(session: Session, snapshot: FinanceSnapshot, request: str)
             word in request.lower()
             for word in ("aws", "amazon", "cloud")
         ):
-            from mira.agents.openai_runtime import (
-                run_aws_spend_investigation,
-            )
-
-            investigation = run_aws_spend_investigation(
+            period = _period(live)
+            investigation = collect_aws_spend_evidence(
                 live,
-                request,
+                period,
             )
 
             artifact["kind"] = "vendor_spend"
-            artifact["investigation"] = investigation
+            artifact["investigation"] = {
+                "execution": "deterministic",
+                "model_invoked": False,
+                "tools_invoked": ["collect_aws_spend_evidence"],
+                "evidence": investigation,
+            }
 
-            headline = investigation["headline"]
-            body = investigation["explanation"]
+            headline = (
+                f"AWS spend changed by "
+                f"{_money(investigation['delta'])} in {period}."
+            )
+
+            body = (
+                f"AWS spend is "
+                f"{_money(investigation['period_total'])} in "
+                f"{investigation['period']} versus "
+                f"{_money(investigation['prior_total'])} in "
+                f"{investigation['prior_period']}. "
+                "These values come directly from canonical ledger "
+                "invoice totals."
+            )
 
         else:
             artifact["kind"] = "vendor_spend"
@@ -1078,6 +1092,7 @@ def command_center_briefing_data(session: Session, snapshot: FinanceSnapshot) ->
     recon = metrics.reconciliation_rate
 
     from sqlalchemy import func, select
+
     from mira.core.models import Decision, Incident, Payment
 
     pending = list(

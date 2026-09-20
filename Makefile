@@ -1,4 +1,4 @@
-.PHONY: install test typecheck api web seed migrate lint eval token-eval demo-reset demo-doctor openai-smoke
+.PHONY: install test typecheck api web seed migrate lint eval token-eval demo-reset demo-doctor
 
 PYTHON ?= .venv/bin/python
 PIP ?= .venv/bin/pip
@@ -47,8 +47,6 @@ demo-reset:
 demo-doctor:
 	PYTHONPATH=apps/api:packages $(PYTHON) -m mira.demo doctor
 
-openai-smoke:
-	PYTHONPATH=apps/api:packages $(PYTHON) -m mira.demo openai-smoke
 
 .PHONY: train-intents test-intents
 

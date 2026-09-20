@@ -13,7 +13,6 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("MIRA_BOOTSTRAP", "true")
     monkeypatch.setenv("MIRA_SPACE_OFFLINE", "1")
     for key in (
-        "OPENAI_API_KEY",
         "DEEPGRAM_API_KEY",
         "ELEVENLABS_API_KEY",
         "DROPBOX_ACCESS_TOKEN",

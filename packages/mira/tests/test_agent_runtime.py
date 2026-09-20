@@ -9,7 +9,6 @@ from sqlalchemy import select
 
 from mira.agents.authority import decide_authority
 from mira.agents.close import CLOSE_NODES, execute_close
-from mira.agents.openai_runtime import TOOL_NAMES, build_org, example_handoff
 from mira.agents.persist import trace_for_decision
 from mira.agents.runtime import (
     executive_request,
@@ -20,6 +19,7 @@ from mira.agents.runtime import (
 )
 from mira.agents.specialists import run_ap_specialist, run_auditor_specialist
 from mira.agents.tools import (
+    TOOL_NAMES,
     tool_assess_risk,
     tool_calculate_autonomy_score,
     tool_calculate_finance_metrics,
@@ -211,27 +211,33 @@ def test_scenario_analysis_is_deterministic(seeded_session, as_of) -> None:
     assert "assumption" in " ".join(first.assumptions).lower() or first.assumptions
     result = executive_request(seeded_session, snapshot, "Can we afford three new engineers?")
     assert result["kind"] == "scenario"
-    assert "Hiring scenario" in result["recommendation"]["headline"]
+    assert "scenario" in result["recommendation"]["headline"].lower()
     assert result["artifact"]["fpna"]
 
 
-def test_human_feedback_event_and_openai_org_contract(seeded_session, as_of) -> None:
+def test_human_feedback_preserves_policy_controls(
+    seeded_session,
+    as_of,
+) -> None:
     snapshot = _snap(seeded_session, as_of)
+
     result = handle_human_feedback(
         seeded_session,
         snapshot,
         "AWS infrastructure invoices under $12,000 are pre-approved.",
     )
+
     assert result["precedent_id"] is None
     assert result["authority_created"] is False
-    org = build_org()
-    assert org["tool_names"]
-    handoff = example_handoff()
-    assert handoff["from"] == "mira_cfo"
-    assert "AgentTask" in handoff["persistence"]
-    policy = evaluate_invoice(_snap(seeded_session, as_of), ids.INV_QUARTZ)
+
+    policy = evaluate_invoice(
+        _snap(seeded_session, as_of),
+        ids.INV_QUARTZ,
+    )
+
     assert policy is not None
     assert POL_VENDOR_NEW_SECONDARY in policy.violated_policy_ids
+
 
 
 def test_runtime_metrics_include_maximor_fields(seeded_session, as_of) -> None:

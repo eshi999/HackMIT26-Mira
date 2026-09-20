@@ -16,7 +16,6 @@ from sklearn.metrics import accuracy_score, classification_report
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import FeatureUnion, Pipeline
 
-
 ROOT = Path(__file__).resolve().parents[3]
 DATA_PATH = ROOT / "data" / "training" / "executive_intents.jsonl"
 MODEL_PATH = ROOT / "data" / "models" / "executive_intent_router.pkl"
