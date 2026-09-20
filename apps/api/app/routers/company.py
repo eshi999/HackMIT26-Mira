@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.deps import get_db
+from app.deps import get_actor, get_db
 from mira.agents.runtime import command_center_briefing_data
 from mira.core.models import (
     Company,
@@ -79,13 +79,41 @@ def get_company(db: Session = Depends(get_db)) -> Company:
     return _require_northstar(db)
 
 
+@router.post("/runtime/overnight-review")
+def run_overnight_review(
+    db: Session = Depends(get_db),
+    _actor=Depends(get_actor),
+) -> dict:
+    """Execute Mira's idempotent overnight finance workflow explicitly."""
+    from mira.agents.runtime import handle_month_end, overnight_review
+
+    company = _require_northstar(db)
+    snapshot = load_snapshot(db, company.id, AS_OF.date())
+
+    overnight = overnight_review(db, snapshot)
+
+    refreshed = load_snapshot(db, company.id, AS_OF.date())
+    close = handle_month_end(
+        db,
+        refreshed,
+        period=AS_OF.strftime("%Y-%m"),
+    )
+
+    db.commit()
+
+    return {
+        "status": "completed",
+        "overnight": overnight,
+        "close": close.model_dump(mode="json"),
+    }
+
+
 @router.get("/briefing", response_model=BriefingOut)
 def get_briefing(db: Session = Depends(get_db)) -> BriefingOut:
     company = _require_northstar(db)
     cid = company.id
     snapshot = load_snapshot(db, cid, AS_OF.date())
     runtime = command_center_briefing_data(db, snapshot)
-    db.commit()
 
     decisions = db.scalars(
         select(Decision).where(Decision.company_id == cid).order_by(Decision.created_at.desc())

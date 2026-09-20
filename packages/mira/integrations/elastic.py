@@ -99,13 +99,69 @@ class ElasticAdapter:
         )
 
     def bulk_index(self, documents: Iterable[IndexDocument]) -> int:
-        count = 0
+        """Index documents with one Elasticsearch bulk request."""
 
-        for document in documents:
-            self.index(document)
-            count += 1
+        docs = list(documents)
+        if not docs:
+            return 0
 
-        return count
+        # Preserve deterministic in-memory demo behavior.
+        if not self.url:
+            for document in docs:
+                self._store.setdefault(document.index, {})[document.doc_id] = document
+            return len(docs)
+
+        # Ensure each index once instead of once per document.
+        for index_name in sorted({document.index for document in docs}):
+            self._ensure_index(index_name)
+
+        import json
+
+        lines: list[str] = []
+        for document in docs:
+            lines.append(
+                json.dumps(
+                    {
+                        "index": {
+                            "_index": document.index,
+                            "_id": document.doc_id,
+                        }
+                    }
+                )
+            )
+            lines.append(json.dumps(document.body, default=str))
+
+        payload = "\n".join(lines) + "\n"
+
+        headers = self._headers()
+        headers["Content-Type"] = "application/x-ndjson"
+
+        try:
+            response = httpx.post(
+                f"{self.url}/_bulk",
+                headers=headers,
+                content=payload,
+                params={"refresh": "wait_for"},
+                timeout=10.0,
+            )
+            response.raise_for_status()
+            result = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            raise ElasticIntegrationError(
+                "Elasticsearch bulk index request failed."
+            ) from exc
+
+        if result.get("errors"):
+            failures = [
+                item
+                for item in result.get("items", [])
+                if next(iter(item.values())).get("error")
+            ]
+            raise ElasticIntegrationError(
+                f"Elasticsearch bulk index had {len(failures)} failed item(s)."
+            )
+
+        return len(docs)
 
     def get(self, index: str, source_id: UUID) -> IndexDocument | None:
         """Retrieve a canonical search document by source UUID."""

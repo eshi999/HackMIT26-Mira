@@ -14,7 +14,10 @@ _SessionLocal: sessionmaker[Session] | None = None
 
 def sqlite_connect_args(url: str) -> dict:
     if url.startswith("sqlite"):
-        return {"check_same_thread": False}
+        return {
+            "check_same_thread": False,
+            "timeout": 30,
+        }
     return {}
 
 
@@ -32,6 +35,8 @@ def get_engine(database_url: str) -> Engine:
             def _enable_sqlite_fk(dbapi_connection, _connection_record) -> None:  # noqa: ANN001
                 cursor = dbapi_connection.cursor()
                 cursor.execute("PRAGMA foreign_keys=ON")
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA busy_timeout=30000")
                 cursor.close()
 
     return _engine
