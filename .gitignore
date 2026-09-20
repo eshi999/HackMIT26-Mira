@@ -40,3 +40,7 @@ coverage/
 
 # Mira locally trained model artifacts
 data/models/*.pkl
+
+# SQLite runtime files
+*.db-wal
+*.db-shm
