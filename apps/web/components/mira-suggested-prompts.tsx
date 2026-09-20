@@ -17,14 +17,13 @@ export function MiraSuggestedPrompts({
   return (
     <div className="space-y-2">
       <p className="text-xs text-mute">Try asking</p>
-
       <div className="flex flex-wrap gap-2">
         {PROMPTS.map((prompt) => (
           <button
             key={prompt}
             type="button"
             onClick={() => onSelect(prompt)}
-            className="rounded-full border border-line bg-paper/40 px-3 py-2 text-sm text-ivory transition hover:border-brass/50 hover:bg-paper/70"
+            className="rounded-md border border-line px-3 py-1.5 text-sm text-mute transition-colors hover:text-ivory focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brass/60 focus-visible:ring-offset-2 focus-visible:ring-offset-ink"
           >
             {prompt}
           </button>

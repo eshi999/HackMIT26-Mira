@@ -9,23 +9,31 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        ink: "#0A0E14",
-        paper: "#10151C",
-        panel: "#161D27",
-        line: "#243040",
-        brass: "#C4A574",
-        ledger: "#7D9B78",
-        mute: "#8B93A0",
-        ivory: "#E8E4DC",
-        alert: "#C47B6A",
+        ink: "#0C0D0F",
+        paper: "#121317",
+        panel: "#17181D",
+        line: "#2A2C33",
+        brass: "#B89A6A",
+        ledger: "#7A9478",
+        mute: "#8B8E96",
+        ivory: "#E7E4DC",
+        alert: "#C17A6C",
       },
       fontFamily: {
         serif: ["var(--font-serif)", "Georgia", "serif"],
         sans: ["var(--font-sans)", "system-ui", "sans-serif"],
         mono: ["var(--font-mono)", "ui-monospace", "monospace"],
       },
+      borderRadius: {
+        lg: "8px",
+        xl: "10px",
+        "2xl": "12px",
+      },
       boxShadow: {
-        desk: "0 24px 80px rgba(0,0,0,0.35)",
+        desk: "none",
+      },
+      spacing: {
+        18: "4.5rem",
       },
     },
   },
