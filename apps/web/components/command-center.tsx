@@ -1,20 +1,61 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
-import {
-  Bar,
-  BarChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { fetchBriefing, type Briefing } from "@/lib/api";
-import { hours, usd } from "@/lib/utils";
 import { MiraRequest } from "@/components/mira-request";
+import { Badge } from "@/components/ui/badge";
+import { buttonVariants } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ErrorState } from "@/components/ui/error-state";
+import { ListPanel, listRowClassName, listRowInteractiveClassName } from "@/components/ui/list-panel";
+import { PageSkeleton } from "@/components/ui/skeleton";
+import { SectionHeading } from "@/components/ui/section-heading";
+import { Stat } from "@/components/ui/stat";
+import { fetchBriefing, type Briefing, type DecisionBrief, type FindingBrief } from "@/lib/api";
+import {
+  decisionStatusLabel,
+  decisionTitle,
+  firstSentence,
+  findingStatusLabel,
+  formatHours,
+  formatPercent,
+  humanize,
+  money,
+  riskVariant,
+  SEVERITY_RANK,
+  statusTone,
+} from "@/lib/display";
+import { buildFindingMemo, recommendationFor } from "@/lib/finding-context";
+import { cn } from "@/lib/utils";
+
+const ATTENTION_LIMIT = 4;
+const FINDING_LIMIT = 4;
+const RESOLVED_LIMIT = 5;
+const RESOLVED_DECISION = new Set(["executed", "approved", "rejected"]);
+
+function attentionItems(briefing: Briefing) {
+  return briefing.pending_decisions
+    .filter((d) => d.requires_human_approval && d.status === "awaiting_human")
+    .sort((a, b) => {
+      const risk = (SEVERITY_RANK[a.risk_level] ?? 9) - (SEVERITY_RANK[b.risk_level] ?? 9);
+      if (risk !== 0) return risk;
+      return Number(b.dollars_impact ?? 0) - Number(a.dollars_impact ?? 0);
+    });
+}
+
+function recentFindings(briefing: Briefing) {
+  return [...briefing.findings].sort((a, b) => {
+    const severity = (SEVERITY_RANK[a.severity] ?? 9) - (SEVERITY_RANK[b.severity] ?? 9);
+    if (severity !== 0) return severity;
+    if (a.status !== b.status) return a.status === "open" ? -1 : 1;
+    return a.title.localeCompare(b.title);
+  });
+}
+
+function resolvedDecisions(briefing: Briefing) {
+  return briefing.pending_decisions.filter((d) => RESOLVED_DECISION.has(d.status));
+}
 
 export function CommandCenter() {
   const [briefing, setBriefing] = useState<Briefing | null>(null);
@@ -23,262 +64,231 @@ export function CommandCenter() {
   useEffect(() => {
     fetchBriefing()
       .then((data) => {
-        if (!data) setError("Mira's office is not reachable. Start the API on :8000.");
-        else setBriefing(data);
+        if (!data) {
+          console.error("Briefing unavailable for command center");
+          setError("Mira's office is not reachable. Start the API on :8000.");
+        } else setBriefing(data);
       })
-      .catch(() => setError("Mira's office is not reachable."));
+      .catch((err) => {
+        console.error("Failed to load command center", err);
+        setError("Mira's office is not reachable.");
+      });
   }, []);
 
   if (error) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Mira is offline</CardTitle>
-        </CardHeader>
-        <CardContent className="text-mute">
-          {error} The command center does not fall back to a chatbot.
-        </CardContent>
-      </Card>
-    );
+    return <ErrorState title="Mira is offline">{error} The command center does not fall back to a chatbot.</ErrorState>;
   }
 
   if (!briefing) {
-    return <p className="text-mute">Opening the office…</p>;
+    return <PageSkeleton label="Opening the office" variant="dashboard" />;
   }
 
-  const cash = Number(briefing.cash.amount);
-  const ap = Number(briefing.open_ap);
-  const chart = [
-    { name: "Cash", value: cash },
-    { name: "Open AP", value: ap },
-  ];
-  const needsYou = briefing.pending_decisions.filter((d) => d.requires_human_approval);
+  const needsYou = attentionItems(briefing);
+  const findings = recentFindings(briefing);
+  const resolved = resolvedDecisions(briefing);
+  const approvalCount = briefing.pending_approvals ?? needsYou.length;
+  const protectedDollars = money(briefing.savings.dollars_protected);
+  const cash = money(briefing.cash.amount);
+  const openAp = money(briefing.open_ap);
+  const saved = money(briefing.savings.dollars_saved);
+  const hoursReturned = formatHours(briefing.savings.hours_saved);
+  const closePct = briefing.close ? formatPercent(briefing.close.completion_pct) : null;
+  const showSaved = saved !== null;
 
   return (
     <div className="space-y-8">
-      <section className="grid gap-8 lg:grid-cols-[1.4fr_0.8fr]">
-        <div>
-          <Badge variant="ledger">Employee · not a chatbot</Badge>
-          <h1 className="mt-4 max-w-3xl font-serif text-4xl leading-tight text-ivory md:text-5xl">
-            {briefing.headline}
-          </h1>
-          <p className="mt-5 max-w-2xl text-base leading-relaxed text-mute">{briefing.narrative}</p>
-        </div>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base text-mute">Ramp · overnight scoreboard</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <div className="text-[11px] uppercase tracking-[0.18em] text-mute">Protected dollars</div>
-              <div className="font-serif text-3xl text-ledger">
-                {usd(briefing.savings.dollars_protected)}
-              </div>
-            </div>
-            <div>
-              <div className="text-[11px] uppercase tracking-[0.18em] text-mute">Hours returned</div>
-              <div className="font-serif text-3xl text-ivory">
-                {hours(briefing.savings.hours_saved)}
-              </div>
-            </div>
-            <div>
-              <div className="text-[11px] uppercase tracking-[0.18em] text-mute">Dollars saved</div>
-              <div className="font-serif text-2xl text-ivory">
-                {usd(briefing.savings.dollars_saved ?? 0)}
-              </div>
-            </div>
-            <div className="text-xs text-mute">
-              Workflow SavingsEvent rows · {briefing.savings.source ?? "runtime"} · {briefing.savings.period}
-            </div>
-          </CardContent>
-        </Card>
+      <section className="max-w-3xl">
+        <p className="text-xs text-mute">Overnight review</p>
+        <h2 className="mt-3 font-serif text-3xl leading-snug tracking-tight text-ivory">
+          {briefing.headline}
+        </h2>
+        <p className="mt-3 text-sm leading-6 text-mute">{briefing.narrative}</p>
+        {briefing.close ? (
+          <p className="mt-3 text-sm leading-6 text-mute">
+            Period {briefing.close.period} close
+            {closePct ? ` is ${closePct} complete` : ""}
+            {briefing.close.blocked.length ? ` · ${briefing.close.blocked.length} items blocked` : null}
+            {briefing.close.completed.length ? ` · ${briefing.close.completed.length} complete` : null}.
+          </p>
+        ) : null}
       </section>
+
+      <section
+        aria-label="Key figures"
+        className="grid grid-cols-2 overflow-hidden rounded-lg border border-line lg:grid-cols-4"
+      >
+        <div className="border-b border-r border-line p-5 lg:border-b-0">
+          <Stat
+            label="Protected"
+            value={protectedDollars ?? "—"}
+            valueClassName="text-ledger"
+            hint={briefing.savings.period ? `Overnight · ${briefing.savings.period}` : "Overnight"}
+          />
+        </div>
+        <div className="border-b border-line p-5 lg:border-b-0 lg:border-r">
+          <Stat
+            label="Hours returned"
+            value={hoursReturned ?? "—"}
+            hint="Time returned to the team"
+          />
+        </div>
+        <div className="border-r border-line p-5">
+          <Stat
+            label="Operating cash"
+            value={cash ?? "—"}
+            hint={
+              openAp
+                ? `${briefing.cash.account_name} · Open AP ${openAp}`
+                : briefing.cash.account_name
+            }
+          />
+        </div>
+        <Link
+          href="/decisions"
+          className="p-5 transition-colors hover:bg-white/[0.02] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brass/60 focus-visible:ring-inset"
+        >
+          <Stat
+            label="Needs approval"
+            value={approvalCount}
+            hint="Awaiting a human"
+            valueClassName={Number(approvalCount) > 0 ? "text-alert" : "text-ivory"}
+          />
+        </Link>
+      </section>
+
+      {showSaved ? <p className="text-sm leading-6 text-mute">Dollars saved this period: {saved}.</p> : null}
 
       <MiraRequest />
 
-      <section className="grid gap-4 md:grid-cols-4">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm text-mute">Autonomous completion</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="font-serif text-3xl">
-              {Number(briefing.autonomous_completion_rate ?? 0).toFixed(0)}
-            </div>
-            <p className="mt-1 text-xs text-mute">Autonomy score from the evaluation engine, 0–100.</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm text-mute">Reconciliation rate</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="font-serif text-3xl">
-              {(Number(briefing.reconciliation_rate ?? 0) * 100).toFixed(0)}%
-            </div>
-            <p className="mt-1 text-xs text-mute">Bank feed matched without forced pairing.</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm text-mute">Open incidents</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="font-serif text-3xl">{briefing.open_incidents ?? 0}</div>
-            <p className="mt-1 text-xs text-mute">Risk-engine incidents still open.</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm text-mute">Gates</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="font-serif text-3xl">{briefing.pending_approvals ?? needsYou.length}</div>
-            <p className="mt-1 text-xs text-mute">
-              Pending approvals · {briefing.blocked_payments ?? 0} blocked payments
-            </p>
-          </CardContent>
-        </Card>
+      <section className="space-y-3">
+        <SectionHeading
+          title="Needs approval"
+          meta={needsYou.length ? `${Math.min(ATTENTION_LIMIT, needsYou.length)} of ${needsYou.length}` : undefined}
+          href={needsYou.length ? "/decisions" : undefined}
+          linkLabel={needsYou.length ? `Review all ${needsYou.length}` : undefined}
+        />
+        {needsYou.length === 0 ? (
+          <EmptyState>No items need approval.</EmptyState>
+        ) : (
+          <ListPanel>
+            {needsYou.slice(0, ATTENTION_LIMIT).map((decision) => (
+              <AttentionRow key={decision.id} decision={decision} />
+            ))}
+          </ListPanel>
+        )}
       </section>
 
-      {briefing.close ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm text-mute">September close</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="font-serif text-3xl">
-              {(Number(briefing.close.completion_pct) * 100).toFixed(0)}%
-            </div>
-            <p className="mt-1 text-xs text-mute">
-              {briefing.close.completed.length} complete · {briefing.close.blocked.length} blocked · audit{" "}
-              {briefing.close.audit_status}
+      <section className="space-y-3">
+        <SectionHeading
+          title="Findings"
+          meta={findings.length ? `${Math.min(FINDING_LIMIT, findings.length)} of ${findings.length}` : undefined}
+          href={findings.length ? "/findings" : undefined}
+          linkLabel="Open findings"
+        />
+        {findings.length === 0 ? (
+          <EmptyState>No open findings.</EmptyState>
+        ) : (
+          <ListPanel>
+            {findings.slice(0, FINDING_LIMIT).map((finding) => (
+              <FindingRow key={finding.id} finding={finding} briefing={briefing} />
+            ))}
+          </ListPanel>
+        )}
+      </section>
+
+      {resolved.length > 0 || (briefing.close && briefing.close.completed.length > 0) ? (
+        <section className="space-y-3">
+          <SectionHeading title="Resolved" meta={resolved.length ? `${resolved.length}` : undefined} />
+          {resolved.length > 0 ? (
+            <ListPanel>
+              {resolved.slice(0, RESOLVED_LIMIT).map((decision) => (
+                <ResolvedRow key={decision.id} decision={decision} />
+              ))}
+            </ListPanel>
+          ) : null}
+          {briefing.close && briefing.close.completed.length > 0 ? (
+            <p className="text-sm leading-6 text-mute">
+              Close checklist complete: {briefing.close.completed.map(humanize).join(", ")}.
             </p>
-          </CardContent>
-        </Card>
+          ) : null}
+        </section>
       ) : null}
 
-      <section className="grid gap-4 md:grid-cols-3">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm text-mute">Operating cash</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="font-serif text-3xl">{usd(cash)}</div>
-            <p className="mt-1 text-xs text-mute">{briefing.cash.account_name}</p>
-            <div className="mt-4 h-28">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={chart}>
-                  <XAxis dataKey="name" stroke="#8B93A0" fontSize={11} tickLine={false} axisLine={false} />
-                  <YAxis hide />
-                  <Tooltip
-                    formatter={(v: number) => usd(v)}
-                    contentStyle={{ background: "#10151C", border: "1px solid #243040" }}
-                  />
-                  <Bar dataKey="value" fill="#C4A574" radius={[6, 6, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm text-mute">Inbox recovered</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="font-serif text-3xl">{briefing.documents_ingested}</div>
-            <p className="mt-1 text-xs text-mute">
-              Dropbox-shaped dump classified into canonical documents. Open Evidence for source
-              lineage.
-            </p>
-            <ul className="mt-4 space-y-1 font-mono text-[11px] text-mute">
-              {briefing.inbox.slice(0, 4).map((doc) => (
-                <li key={doc.id} className="truncate">
-                  {doc.document_class} · {doc.filename}
-                </li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm text-mute">Public signal</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {briefing.signals.slice(0, 1).map((s) => (
-              <div key={s.series_id}>
-                <div className="font-serif text-3xl">
-                  {Number(s.value).toFixed(2)}
-                  <span className="ml-2 text-lg text-mute">%</span>
-                </div>
-                <p className="mt-1 text-xs text-mute">
-                  {s.title} · {s.source} {s.series_id} · {s.as_of}
-                </p>
-                <p className="mt-3 text-sm leading-relaxed text-ivory/80">{s.note}</p>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      </section>
-
-      <section className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-        <div>
-          <h2 className="mb-3 font-serif text-2xl">Needs you</h2>
-          <div className="space-y-3">
-            {needsYou.map((d) => (
-              <Card key={d.id} className="border-brass/30">
-                <CardContent className="pt-5">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge variant="alert">Human review</Badge>
-                    <Badge variant="sandbox">Sandbox if purchased</Badge>
-                    <Badge variant="mute">{d.risk_level} risk</Badge>
-                    <Badge variant="mute">conf {Number(d.confidence_score).toFixed(2)}</Badge>
-                  </div>
-                  <h3 className="mt-3 font-serif text-xl">{d.action.replaceAll("_", " ")}</h3>
-                  <p className="mt-2 text-sm leading-relaxed text-mute">{d.rationale}</p>
-                  <dl className="mt-4 grid gap-2 text-xs text-mute">
-                    <div>
-                      <span className="text-ivory">Policy. </span>
-                      {d.policy_basis}
-                    </div>
-                    <div>
-                      <span className="text-ivory">Authority. </span>
-                      {d.authority_basis}
-                    </div>
-                  </dl>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </div>
-        <div>
-          <h2 className="mb-3 font-serif text-2xl">What I already did</h2>
-          <div className="space-y-3">
-            {briefing.findings.map((f) => (
-              <Card key={f.id}>
-                <CardContent className="pt-5">
-                  <Badge variant={f.severity === "high" ? "alert" : "ledger"}>{f.finding_type}</Badge>
-                  <h3 className="mt-2 font-serif text-lg">{f.title}</h3>
-                  <p className="mt-2 text-sm text-mute">{f.description}</p>
-                </CardContent>
-              </Card>
-            ))}
-            {briefing.invoices
-              .filter((i) => i.is_duplicate_suspect)
-              .map((i) => (
-                <Card key={i.id}>
-                  <CardContent className="pt-5">
-                    <Badge variant="alert">Duplicate blocked</Badge>
-                    <p className="mt-2 text-sm">
-                      {i.vendor_name} {i.invoice_number} · {usd(i.total)}
-                    </p>
-                  </CardContent>
-                </Card>
-              ))}
-          </div>
-        </div>
-      </section>
-      <p className="text-xs text-mute">{briefing.sandbox_notice}</p>
+      <p className="text-xs leading-5 text-mute">{briefing.sandbox_notice}</p>
     </div>
+  );
+}
+
+function AttentionRow({ decision }: { decision: DecisionBrief }) {
+  const impact = money(decision.dollars_impact);
+  const why = firstSentence(decision.rationale);
+  const evidence = decision.policy_basis?.trim();
+  const recommendation = recommendationFor(decision);
+
+  return (
+    <Link href="/decisions" className={cn(listRowInteractiveClassName, "sm:flex sm:items-start sm:justify-between sm:gap-4")}>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant="alert">Needs approval</Badge>
+          <Badge variant={riskVariant(decision.risk_level)}>{humanize(decision.risk_level)}</Badge>
+          {decision.decision_type === "procurement" ? <Badge variant="sandbox">Sandbox</Badge> : null}
+        </div>
+        <h3 className="mt-2 font-serif text-lg text-ivory">{decisionTitle(decision.action, decision.decision_type)}</h3>
+        {impact ? <p className="mt-1 font-serif text-xl tabular-nums text-ivory">{impact}</p> : null}
+        {why ? <p className="mt-2 text-sm leading-6 text-mute">{why}</p> : null}
+        {evidence ? (
+          <p className="mt-2 truncate text-xs text-mute">
+            <span className="text-ivory">Evidence. </span>
+            {evidence}
+          </p>
+        ) : null}
+        {recommendation ? <p className="mt-2 text-sm text-ivory">{recommendation}</p> : null}
+      </div>
+      <span className={cn(buttonVariants({ size: "sm" }), "mt-3 pointer-events-none shrink-0 sm:mt-0")}>
+        Review
+      </span>
+    </Link>
+  );
+}
+
+function FindingRow({ finding, briefing }: { finding: FindingBrief; briefing: Briefing }) {
+  const memo = buildFindingMemo(finding, briefing, []);
+  const why = firstSentence(finding.description);
+  const status = findingStatusLabel(finding.status);
+
+  return (
+    <Link href={`/findings/${finding.id}`} className={listRowInteractiveClassName}>
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant={riskVariant(finding.severity)}>{humanize(finding.severity)}</Badge>
+        <Badge variant={statusTone(status)}>{status}</Badge>
+        {memo.approval ? <Badge variant={statusTone(memo.approval)}>{memo.approval}</Badge> : null}
+      </div>
+      <div className="mt-2 flex flex-wrap items-baseline justify-between gap-3">
+        <h3 className="min-w-0 font-serif text-lg text-ivory">{finding.title}</h3>
+        {memo.impact ? (
+          <p className="shrink-0 font-serif text-xl tabular-nums text-ivory sm:w-28 sm:text-right">
+            {memo.impact}
+          </p>
+        ) : null}
+      </div>
+      {why ? <p className="mt-1 text-sm leading-6 text-mute">{why}</p> : null}
+    </Link>
+  );
+}
+
+function ResolvedRow({ decision }: { decision: DecisionBrief }) {
+  const impact = money(decision.dollars_impact);
+  const why = firstSentence(decision.rationale);
+  const status = decisionStatusLabel(decision.status, decision.requires_human_approval);
+
+  return (
+    <article className={listRowClassName}>
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant={statusTone(status)}>{status}</Badge>
+        {impact ? <span className="font-mono text-xs tabular-nums text-ivory">{impact}</span> : null}
+      </div>
+      <h3 className="mt-2 font-serif text-lg text-ivory">{decisionTitle(decision.action, decision.decision_type)}</h3>
+      {why ? <p className="mt-1 text-sm leading-6 text-mute">{why}</p> : null}
+    </article>
   );
 }

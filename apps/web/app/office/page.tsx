@@ -1,3 +1,5 @@
+import { Card, CardContent } from "@/components/ui/card";
+
 const steps = [
   {
     number: "01",
@@ -38,96 +40,69 @@ const steps = [
 
 export default function OfficePage() {
   return (
-    <main className="mx-auto w-full max-w-[1400px] px-6 py-10 lg:px-8">
-      <section className="max-w-4xl">
-        <div className="inline-flex rounded-full border border-line px-3 py-1 text-[10px] uppercase tracking-[0.18em] text-ledger">
-          How Mira works
-        </div>
-
-        <h1 className="mt-5 font-serif text-4xl leading-tight text-ivory lg:text-5xl">
+    <div className="space-y-8">
+      <section className="max-w-3xl">
+        <h2 className="font-serif text-3xl leading-snug tracking-tight text-ivory">
           From signal to trusted finance action.
-        </h1>
-
-        <p className="mt-4 max-w-3xl text-base leading-7 text-mute">
-          One AI CFO at the surface. A controlled finance operation underneath.
-          Mira coordinates the work while deterministic systems remain the
-          source of financial truth.
+        </h2>
+        <p className="mt-3 text-sm leading-6 text-mute">
+          One AI CFO at the surface. A controlled finance operation underneath. Mira coordinates the
+          work while deterministic systems remain the source of financial truth.
         </p>
       </section>
 
-      <section className="mt-9 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         {steps.map((step, index) => (
-          <article
-            key={step.number}
-            className="relative flex min-h-[230px] flex-col rounded-2xl border border-line bg-paper/55 p-5"
-          >
-            <div className="flex items-center justify-between">
-              <span className="font-mono text-[10px] tracking-[0.18em] text-brass">
-                {step.number}
-              </span>
-
-              {index < steps.length - 1 ? (
-                <span
-                  aria-hidden="true"
-                  className="hidden text-line xl:block"
-                >
-                  →
-                </span>
-              ) : null}
-            </div>
-
-            <h2 className="mt-5 font-serif text-xl text-ivory">
-              {step.title}
-            </h2>
-
-            <p className="mt-3 text-sm leading-6 text-mute">
-              {step.description}
-            </p>
-
-            <p className="mt-auto border-t border-line pt-4 text-[11px] leading-5 text-mute">
-              {step.detail}
-            </p>
-          </article>
+          <Card key={step.number} className="flex flex-col">
+            <CardContent className="flex flex-1 flex-col pt-5">
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-[10px] tracking-[0.18em] text-brass">{step.number}</span>
+                {index < steps.length - 1 ? (
+                  <span aria-hidden="true" className="hidden text-line xl:block">
+                    →
+                  </span>
+                ) : null}
+              </div>
+              <h3 className="mt-5 font-serif text-xl text-ivory">{step.title}</h3>
+              <p className="mt-3 text-sm leading-6 text-mute">{step.description}</p>
+              <p className="mt-5 border-t border-line pt-4 text-xs leading-5 text-mute">{step.detail}</p>
+            </CardContent>
+          </Card>
         ))}
       </section>
 
-      <section className="mt-5 grid gap-3 md:grid-cols-3">
-        <div className="rounded-xl border border-line bg-paper/30 px-5 py-4">
-          <p className="text-[10px] uppercase tracking-[0.16em] text-mute">
-            Language
-          </p>
-
-          <p className="mt-2 text-sm text-ivory">
-            The trained router understands what the executive is asking.
-          </p>
-        </div>
-
-        <div className="rounded-xl border border-line bg-paper/30 px-5 py-4">
-          <p className="text-[10px] uppercase tracking-[0.16em] text-mute">
-            Financial truth
-          </p>
-
-          <p className="mt-2 text-sm text-ivory">
-            Deterministic engines establish the numbers, controls, and evidence.
-          </p>
-        </div>
-
-        <div className="rounded-xl border border-line bg-paper/30 px-5 py-4">
-          <p className="text-[10px] uppercase tracking-[0.16em] text-mute">
-            Authority
-          </p>
-
-          <p className="mt-2 text-sm text-ivory">
-            Humans retain control over consequential financial decisions.
-          </p>
-        </div>
+      <section className="grid gap-3 md:grid-cols-3">
+        <Card>
+          <CardContent className="pt-5">
+            <p className="text-xs text-mute">Language</p>
+            <p className="mt-2 text-sm leading-6 text-ivory">
+              The trained router understands what the executive is asking.
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-5">
+            <p className="text-xs text-mute">Financial truth</p>
+            <p className="mt-2 text-sm leading-6 text-ivory">
+              Deterministic engines establish the numbers, controls, and evidence.
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-5">
+            <p className="text-xs text-mute">Authority</p>
+            <p className="mt-2 text-sm leading-6 text-ivory">
+              Humans retain control over consequential financial decisions.
+            </p>
+          </CardContent>
+        </Card>
       </section>
 
-      <footer className="mt-6 flex flex-wrap gap-x-5 gap-y-2 border-t border-line pt-5 text-xs text-mute">
+      <footer className="flex flex-wrap gap-x-5 gap-y-2 border-t border-line pt-5 text-xs text-mute">
         <span className="text-ledger">Mira coordinates.</span>
         <span>Deterministic systems verify.</span>
         <span>Humans retain control.</span>
       </footer>
-    </main>
+    </div>
   );
 }

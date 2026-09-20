@@ -5,7 +5,10 @@ import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ErrorState } from "@/components/ui/error-state";
+import { PageSkeleton } from "@/components/ui/skeleton";
 import { fetchSpaceSignals } from "@/lib/api";
+import { formatCoord, formatDateTime, humanize, statusTone } from "@/lib/display";
 
 type SpacePayload = {
   live?: boolean;
@@ -25,10 +28,15 @@ export default function SignalsPage() {
   useEffect(() => {
     fetchSpaceSignals()
       .then((data) => {
-        if (!data) setError("External signals are unreachable.");
-        else setPayload(data as SpacePayload);
+        if (!data) {
+          console.error("External signals unavailable");
+          setError("External signals are unreachable.");
+        } else setPayload(data as SpacePayload);
       })
-      .catch(() => setError("External signals are unreachable."));
+      .catch((err) => {
+        console.error("Failed to load external signals", err);
+        setError("External signals are unreachable.");
+      });
   }, []);
 
   async function listen() {
@@ -43,62 +51,76 @@ export default function SignalsPage() {
       },
       body: JSON.stringify({ text: payload.narration, source: "space_narration" }),
     });
-    if (!res.ok) return;
+    if (!res.ok) {
+      console.error("Space narration playback failed", res.status);
+      return;
+    }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     await new Audio(url).play();
   }
 
-  if (error) return <p className="text-mute">{error}</p>;
-  if (!payload) return <p className="text-mute">Fetching public space data…</p>;
+  if (error) return <ErrorState title="Signals are offline">{error}</ErrorState>;
+  if (!payload) return <PageSkeleton label="Loading public space data" />;
+
+  const launchTime = formatDateTime(payload.launch?.date_utc);
+  const latitude = formatCoord(payload.iss?.latitude);
+  const longitude = formatCoord(payload.iss?.longitude);
+  const grokLabel = payload.grok ? humanize(payload.grok) : "Unavailable";
+  const position =
+    latitude && longitude ? `${latitude}, ${longitude}` : latitude ?? longitude ?? "Unavailable";
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <Badge variant="ledger">SpaceXAI · isolated</Badge>
-      <h1 className="font-serif text-4xl">External signals</h1>
-      <p className="max-w-2xl text-mute">
-        Public space observations plus optional Grok Voice. This rail does not write finance truth,
-        savings, or decisions.
-      </p>
+
       <Card>
         <CardHeader>
           <CardTitle>Next launch</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-2 text-sm text-mute">
+        <CardContent className="space-y-2 text-sm leading-6 text-mute">
           <p className="font-serif text-2xl text-ivory">{payload.launch?.name ?? "Unavailable"}</p>
-          <p>{payload.launch?.date_utc ?? "No public time"}</p>
-          <p>Source: {payload.launch?.provider}</p>
+          <p>{launchTime ?? "No public time"}</p>
+          {payload.launch?.provider ? <p>Source: {payload.launch.provider}</p> : null}
         </CardContent>
       </Card>
+
       <Card>
         <CardHeader>
           <CardTitle>ISS position</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-2 text-sm text-mute">
-          <p className="font-serif text-2xl text-ivory">
-            {payload.iss?.latitude ?? "—"}, {payload.iss?.longitude ?? "—"}
-          </p>
-          <p>Source: {payload.iss?.provider}</p>
+        <CardContent className="space-y-2 text-sm leading-6 text-mute">
+          <p className="font-serif text-2xl tabular-nums text-ivory">{position}</p>
+          {payload.iss?.provider ? <p>Source: {payload.iss.provider}</p> : null}
         </CardContent>
       </Card>
+
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-center gap-2">
             <CardTitle>Grok Voice</CardTitle>
-            <Badge variant={payload.grok === "live" ? "ledger" : "mute"}>{payload.grok}</Badge>
+            <Badge variant={statusTone(grokLabel)}>{grokLabel}</Badge>
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
-          <p className="text-sm leading-relaxed text-ivory/80">{payload.narration}</p>
+          {payload.narration ? (
+            <p className="text-sm leading-6 text-ivory/80">{payload.narration}</p>
+          ) : (
+            <p className="text-sm leading-6 text-mute">No narration available.</p>
+          )}
           {payload.voice_available ? (
-            <Button size="sm" onClick={listen}>
+            <Button size="sm" onClick={listen} disabled={!payload.narration}>
               Speak
             </Button>
           ) : (
-            <p className="text-xs text-mute">Grok Voice audio is optional. The script above is the fallback.</p>
+            <p className="text-xs leading-5 text-mute">
+              Grok Voice audio is optional. The script above is the fallback.
+            </p>
           )}
-          <p className="text-xs text-mute">
-            Affects finance truth: {payload.affects_finance_truth ? "yes" : "no"}
+          <p className="text-xs leading-5 text-mute">
+            {payload.affects_finance_truth
+              ? "This rail is marked as affecting finance truth."
+              : "This rail does not write finance truth, savings, or decisions."}
           </p>
         </CardContent>
       </Card>
