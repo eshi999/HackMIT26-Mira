@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { fetchBriefing, type Briefing } from "@/lib/api";
 import { hours, usd } from "@/lib/utils";
+import { MiraRequest } from "@/components/mira-request";
 
 export function CommandCenter() {
   const [briefing, setBriefing] = useState<Briefing | null>(null);
@@ -65,19 +66,13 @@ export function CommandCenter() {
         </div>
         <Card>
           <CardHeader>
-            <CardTitle className="text-base text-mute">Overnight scoreboard</CardTitle>
+            <CardTitle className="text-base text-mute">Ramp · overnight scoreboard</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
-              <div className="text-[11px] uppercase tracking-[0.18em] text-mute">Dollars protected</div>
+              <div className="text-[11px] uppercase tracking-[0.18em] text-mute">Protected dollars</div>
               <div className="font-serif text-3xl text-ledger">
                 {usd(briefing.savings.dollars_protected)}
-              </div>
-            </div>
-            <div>
-              <div className="text-[11px] uppercase tracking-[0.18em] text-mute">Dollars saved</div>
-              <div className="font-serif text-3xl text-ivory">
-                {usd(briefing.savings.dollars_saved ?? 0)}
               </div>
             </div>
             <div>
@@ -86,12 +81,20 @@ export function CommandCenter() {
                 {hours(briefing.savings.hours_saved)}
               </div>
             </div>
+            <div>
+              <div className="text-[11px] uppercase tracking-[0.18em] text-mute">Dollars saved</div>
+              <div className="font-serif text-2xl text-ivory">
+                {usd(briefing.savings.dollars_saved ?? 0)}
+              </div>
+            </div>
             <div className="text-xs text-mute">
               Workflow SavingsEvent rows · {briefing.savings.source ?? "runtime"} · {briefing.savings.period}
             </div>
           </CardContent>
         </Card>
       </section>
+
+      <MiraRequest />
 
       <section className="grid gap-4 md:grid-cols-4">
         <Card>
@@ -185,7 +188,8 @@ export function CommandCenter() {
           <CardContent>
             <div className="font-serif text-3xl">{briefing.documents_ingested}</div>
             <p className="mt-1 text-xs text-mute">
-              Messy Dropbox-shaped dump classified into canonical documents.
+              Dropbox-shaped dump classified into canonical documents. Open Evidence for source
+              lineage.
             </p>
             <ul className="mt-4 space-y-1 font-mono text-[11px] text-mute">
               {briefing.inbox.slice(0, 4).map((doc) => (

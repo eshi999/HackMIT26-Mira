@@ -8,7 +8,9 @@ from mira.agents.protocol import MIRA_ORG
 from mira.integrations.deepgram import DeepgramAdapter
 from mira.integrations.dropbox import StorageAdapter
 from mira.integrations.elastic import ElasticAdapter
+from mira.integrations.elevenlabs import ElevenLabsAdapter
 from mira.integrations.public_data import PublicDataAdapter
+from mira.integrations.spacexai import GrokVoiceAdapter
 from mira.integrations.visa import VisaAdapter
 from mira.integrations.zenni import SKILL_ROUTES, ZenniAdapter
 
@@ -25,10 +27,12 @@ def meta() -> dict:
             settings.elasticsearch_url,
             api_key=settings.elasticsearch_api_key,
         ),
-        DeepgramAdapter(),
+        DeepgramAdapter(settings.deepgram_api_key),
+        ElevenLabsAdapter(settings.elevenlabs_api_key, voice_id=settings.elevenlabs_voice_id),
         VisaAdapter(),
         ZenniAdapter(),
         PublicDataAdapter(),
+        GrokVoiceAdapter(settings.grok_key),
     ]
     return {
         "product": "Mira",

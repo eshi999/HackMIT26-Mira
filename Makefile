@@ -1,4 +1,4 @@
-.PHONY: install test typecheck api web seed migrate lint eval token-eval
+.PHONY: install test typecheck api web seed migrate lint eval token-eval demo-reset demo-doctor openai-smoke
 
 PYTHON ?= .venv/bin/python
 PIP ?= .venv/bin/pip
@@ -39,3 +39,13 @@ eval:
 
 token-eval:
 	PYTHONPATH=packages $(PYTHON) -m mira.context.evaluation
+
+demo-reset:
+	mkdir -p data
+	PYTHONPATH=apps/api:packages $(PYTHON) -m mira.demo reset
+
+demo-doctor:
+	PYTHONPATH=apps/api:packages $(PYTHON) -m mira.demo doctor
+
+openai-smoke:
+	PYTHONPATH=apps/api:packages $(PYTHON) -m mira.demo openai-smoke

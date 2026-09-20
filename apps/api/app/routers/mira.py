@@ -22,7 +22,7 @@ from mira.agents.runtime import (
     teach_precedent,
 )
 from mira.core.enums import OfficeEventType
-from mira.core.models import Company, Decision
+from mira.core.models import Company, Decision, Precedent
 from mira.finance.snapshot import load_snapshot
 from mira.seed.northstar import AS_OF
 
@@ -161,6 +161,33 @@ def post_resolve_decision(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     db.commit()
     return result
+
+
+@router.get("/precedents")
+def list_precedents(db: Session = Depends(get_db)) -> dict:
+    company, _snapshot = _company_snapshot(db)
+    rows = (
+        db.query(Precedent)
+        .filter(Precedent.company_id == company.id)
+        .order_by(Precedent.created_at.desc())
+        .all()
+    )
+    return {
+        "precedents": [
+            {
+                "id": str(row.id),
+                "summary": row.summary,
+                "outcome": row.outcome,
+                "scope": row.scope,
+                "status": row.status,
+                "authorizer": row.authorizer,
+                "reusable_rule": row.reusable_rule,
+                "conditions": row.conditions,
+                "period": row.period,
+            }
+            for row in rows
+        ]
+    }
 
 
 @router.get("/office/runs")
