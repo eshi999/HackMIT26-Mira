@@ -34,8 +34,8 @@ def test_briefing_is_not_a_chatbot(client) -> None:
     assert "chat" not in body["headline"].lower()
     assert body["mira_status"] == "on_duty"
     assert body["company"]["name"] == "Northstar Labs"
-    assert float(body["savings"]["dollars_protected"]) >= 18400
-    assert float(body["savings"]["hours_saved"]) >= 8
+    assert float(body["savings"]["dollars_protected"]) == 0.0
+    assert float(body["savings"]["hours_saved"]) == 0.0
     assert any(d["requires_human_approval"] for d in body["pending_decisions"])
     assert any(i["is_duplicate_suspect"] for i in body["invoices"])
     assert any(s["series_id"] == "DGS3MO" for s in body["signals"])

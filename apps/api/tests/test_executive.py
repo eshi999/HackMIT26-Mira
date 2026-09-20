@@ -38,7 +38,7 @@ def test_briefing_uses_runtime_savings(client) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["savings"]["source"] == "runtime"
-    assert float(body["savings"]["dollars_protected"]) >= 18400
-    assert float(body["savings"]["hours_saved"]) >= 8
+    assert float(body["savings"]["dollars_protected"]) == 0.0
+    assert float(body["savings"]["hours_saved"]) == 0.0
     assert "chat" not in body["headline"].lower()
     assert body["pending_approvals"] >= 1

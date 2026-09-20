@@ -10,7 +10,6 @@ class Settings(BaseSettings):
     mira_env: str = "development"
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
     mira_bootstrap: bool = True
-    openai_api_key: str | None = None
     deepgram_api_key: str | None = None
     elevenlabs_api_key: str | None = None
     elevenlabs_voice_id: str | None = None

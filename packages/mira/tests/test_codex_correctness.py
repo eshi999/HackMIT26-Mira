@@ -4,14 +4,12 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
 
 from mira.agents.auth import resolve_demo_token
 from mira.agents.close import close_status, execute_close, parse_close_period
-from mira.agents.openai_runtime import run_aws_spend_investigation
 from mira.agents.runtime import (
     handle_human_feedback,
     handle_month_end,
@@ -21,7 +19,6 @@ from mira.agents.runtime import (
     teach_precedent,
 )
 from mira.agents.tools import (
-    collect_aws_spend_evidence,
     tool_evaluate_contract,
     tool_three_way_match,
 )
@@ -406,49 +403,6 @@ def test_incomplete_contract_is_unknown(seeded_session, as_of) -> None:
     assert result["is_violation"] is None
     assert Decimal(str(result["confidence"]["score"])) < Decimal("0.99")
     assert "not inferred" in result["explanation"].lower() or "incomplete" in result["explanation"].lower()
-
-
-def test_openai_live_path_invokes_runner_and_tools(seeded_session, as_of, monkeypatch) -> None:
-    snapshot = _snap(seeded_session, as_of)
-    evidence = collect_aws_spend_evidence(snapshot, "2026-09")
-    assert evidence["period_total"] == "19800.00"
-    assert evidence["prior_total"] == "11000.00"
-    monkeypatch.setattr("mira.agents.openai_runtime.openai_configured", lambda: False)
-    fallback = run_aws_spend_investigation(snapshot, "Why did September AWS spend increase?")
-    assert fallback["execution"] == "deterministic_fallback"
-    assert fallback["model_invoked"] is False
-    assert fallback["endpoint"] == "POST /api/v1/executive/request"
-
-    class FakeRunner:
-        called = False
-
-        @staticmethod
-        def run_sync(agent, prompt):
-            FakeRunner.called = True
-            outputs = []
-            for tool in getattr(agent, "tools", []):
-                fn = getattr(tool, "fn", tool)
-                if callable(fn):
-                    try:
-                        outputs.append(fn(period="2026-09"))
-                    except TypeError:
-                        outputs.append(fn())
-            assert outputs
-            return SimpleNamespace(
-                final_output="September AWS rose from ledger totals, not invented math.",
-                new_items=outputs,
-            )
-
-    live = run_aws_spend_investigation(
-        snapshot,
-        "Why did September AWS spend increase?",
-        runner=FakeRunner,
-        force_live=True,
-    )
-    assert FakeRunner.called is True
-    assert live["execution"] == "openai_agents_sdk"
-    assert live["model_invoked"] is True
-    assert live["tools_invoked"]
 
 
 def test_seeded_demo_metrics_are_deterministic(tmp_path, monkeypatch) -> None:

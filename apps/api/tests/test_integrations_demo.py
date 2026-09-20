@@ -49,4 +49,3 @@ def test_meta_includes_voice_adapters(client) -> None:
     assert body["adapters"]["deepgram"] == "demo"
     assert body["adapters"]["elevenlabs"] == "demo"
     assert body["adapters"]["grok"] == "demo"
-    assert body["openai_configured"] is False

@@ -16,10 +16,9 @@ from mira.demo.status import (
     elastic_row,
     elevenlabs_row,
     grok_row,
-    openai_row,
 )
 
-OPTIONAL = ("dropbox", "elastic", "deepgram", "elevenlabs", "openai", "grok")
+OPTIONAL = ("dropbox", "elastic", "deepgram", "elevenlabs", "grok")
 
 
 def _db_row() -> dict[str, Any]:
@@ -63,7 +62,6 @@ def collect_report() -> dict[str, Any]:
         elastic_row(),
         deepgram_row(),
         elevenlabs_row(),
-        openai_row(),
         grok_row(),
     ]
     by_name = {row["name"]: row for row in checks}

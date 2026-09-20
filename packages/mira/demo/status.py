@@ -84,28 +84,6 @@ def elevenlabs_row() -> dict[str, Any]:
     return integration_row("elevenlabs", True, status, note)
 
 
-def openai_row() -> dict[str, Any]:
-    from mira.agents.openai_runtime import HAS_OPENAI_AGENTS, openai_configured
-
-    configured = key_configured("OPENAI_API_KEY")
-    if not configured:
-        return integration_row(
-            "openai",
-            False,
-            AdapterStatus.DEMO.value,
-            "key not configured; not required",
-        )
-    if not HAS_OPENAI_AGENTS:
-        return integration_row(
-            "openai",
-            True,
-            AdapterStatus.UNAVAILABLE.value,
-            "key present; openai-agents package missing",
-        )
-    status = AdapterStatus.LIVE.value if openai_configured() else AdapterStatus.DEMO.value
-    return integration_row("openai", True, status, "key present; not required")
-
-
 def grok_row() -> dict[str, Any]:
     adapter = GrokVoiceAdapter(os.environ.get("XAI_API_KEY") or os.environ.get("GROK_API_KEY"))
     configured = key_configured("XAI_API_KEY", "GROK_API_KEY")
