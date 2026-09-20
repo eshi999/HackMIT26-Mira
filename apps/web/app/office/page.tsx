@@ -1,4 +1,5 @@
 import { OfficeGraph } from "@/components/office-graph";
+import { ContextEfficiency } from "@/components/context-efficiency";
 import { Badge } from "@/components/ui/badge";
 
 export default function OfficePage() {
@@ -12,6 +13,7 @@ export default function OfficePage() {
         Mira plans, delegates, and reviews. The OpenAI Agents SDK is the planner; tools remain the source of financial truth.
       </p>
       <OfficeGraph />
+      <ContextEfficiency />
     </div>
   );
 }

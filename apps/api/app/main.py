@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.routers import company, health, meta, mira
+from app.routers import company, context, health, meta, mira
 from mira.core.db import create_schema, get_engine, reset_engine
 from mira.seed.northstar import seed_from_url
 
@@ -44,6 +44,7 @@ def create_app() -> FastAPI:
     application.include_router(company.router)
     application.include_router(meta.router)
     application.include_router(mira.router)
+    application.include_router(context.router)
     return application
 
 
