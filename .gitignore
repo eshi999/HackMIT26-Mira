@@ -37,3 +37,6 @@ data/mira.db
 # Test / tooling
 .tox/
 coverage/
+
+# Mira locally trained model artifacts
+data/models/*.pkl

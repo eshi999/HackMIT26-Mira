@@ -1,0 +1,165 @@
+{"text":"What is our cash position?","intent":"cash_position"}
+{"text":"How much cash do we have?","intent":"cash_position"}
+{"text":"Show me operating cash","intent":"cash_position"}
+{"text":"How much liquidity do we have?","intent":"cash_position"}
+{"text":"What is cash looking like today?","intent":"cash_position"}
+{"text":"Give me our current cash balance","intent":"cash_position"}
+{"text":"Where do we stand on cash?","intent":"cash_position"}
+{"text":"How healthy is our cash position?","intent":"cash_position"}
+
+{"text":"How much do we owe vendors?","intent":"ap_ar"}
+{"text":"What's sitting in AP?","intent":"ap_ar"}
+{"text":"How much AP is open?","intent":"ap_ar"}
+{"text":"What do customers owe us?","intent":"ap_ar"}
+{"text":"What's our open AR?","intent":"ap_ar"}
+{"text":"Show receivables and payables","intent":"ap_ar"}
+{"text":"How much are we waiting to collect?","intent":"ap_ar"}
+{"text":"Give me AP and AR","intent":"ap_ar"}
+
+{"text":"What payments need my approval?","intent":"pending_approvals"}
+{"text":"What needs me?","intent":"pending_approvals"}
+{"text":"What is waiting for approval?","intent":"pending_approvals"}
+{"text":"Do I need to approve anything?","intent":"pending_approvals"}
+{"text":"Show me pending approvals","intent":"pending_approvals"}
+{"text":"What decisions are waiting on me?","intent":"pending_approvals"}
+{"text":"Which payments are gated?","intent":"pending_approvals"}
+{"text":"What human approvals are open?","intent":"pending_approvals"}
+
+{"text":"How is September close going?","intent":"close_status"}
+{"text":"What's blocking month end?","intent":"close_status"}
+{"text":"Are we ready to close?","intent":"close_status"}
+{"text":"Give me the September close status","intent":"close_status"}
+{"text":"What's left for month end?","intent":"close_status"}
+{"text":"Why is the close blocked?","intent":"close_status"}
+{"text":"What close tasks are incomplete?","intent":"close_status"}
+{"text":"How far through close are we?","intent":"close_status"}
+
+{"text":"Can we afford another engineer?","intent":"scenario"}
+{"text":"Can we hire someone?","intent":"scenario"}
+{"text":"What if we add two engineers?","intent":"scenario"}
+{"text":"Can we afford this hire?","intent":"scenario"}
+{"text":"Run a hiring scenario","intent":"scenario"}
+{"text":"What happens if payroll increases?","intent":"scenario"}
+{"text":"Can we increase headcount?","intent":"scenario"}
+{"text":"What does another hire do to cash?","intent":"scenario"}
+
+{"text":"Why did AWS spend increase?","intent":"vendor_spend"}
+{"text":"What's happening with AWS?","intent":"vendor_spend"}
+{"text":"Explain the AWS variance","intent":"vendor_spend"}
+{"text":"Why is cloud spend higher?","intent":"vendor_spend"}
+{"text":"What's driving vendor spend?","intent":"vendor_spend"}
+{"text":"Show me unusual vendor spend","intent":"vendor_spend"}
+{"text":"Why did our cloud bill jump?","intent":"vendor_spend"}
+{"text":"Where did vendor costs move?","intent":"vendor_spend"}
+
+{"text":"What happened with HelixCloud?","intent":"invoice_investigation"}
+{"text":"Why was the HelixCloud invoice held?","intent":"invoice_investigation"}
+{"text":"Tell me about invoice BIO-1400","intent":"invoice_investigation"}
+{"text":"Why did we reject that invoice?","intent":"invoice_investigation"}
+{"text":"Investigate this invoice","intent":"invoice_investigation"}
+{"text":"Why is this invoice risky?","intent":"invoice_investigation"}
+{"text":"Why didn't we pay this bill?","intent":"invoice_investigation"}
+{"text":"Explain the invoice exception","intent":"invoice_investigation"}
+
+{"text":"Show me the evidence","intent":"evidence_query"}
+{"text":"What document supports this?","intent":"evidence_query"}
+{"text":"Where did this number come from?","intent":"evidence_query"}
+{"text":"Show me the contract","intent":"evidence_query"}
+{"text":"What evidence did Mira use?","intent":"evidence_query"}
+{"text":"Can I see the source document?","intent":"evidence_query"}
+{"text":"Where is the proof?","intent":"evidence_query"}
+{"text":"Which documents back this decision?","intent":"evidence_query"}
+
+{"text":"What did you catch overnight?","intent":"finance_review"}
+{"text":"What happened overnight?","intent":"finance_review"}
+{"text":"Give me the morning finance review","intent":"finance_review"}
+{"text":"What did Mira find?","intent":"finance_review"}
+{"text":"Summarize overnight activity","intent":"finance_review"}
+{"text":"Give me today's finance briefing","intent":"finance_review"}
+{"text":"What should I know this morning?","intent":"finance_review"}
+{"text":"Give me the executive finance review","intent":"finance_review"}
+
+{"text":"What controls failed?","intent":"risk_controls"}
+{"text":"What risks should I know about?","intent":"risk_controls"}
+{"text":"Show me open incidents","intent":"risk_controls"}
+{"text":"Where are our control problems?","intent":"risk_controls"}
+{"text":"What finance risks are open?","intent":"risk_controls"}
+{"text":"What did audit flag?","intent":"risk_controls"}
+{"text":"Are there control exceptions?","intent":"risk_controls"}
+{"text":"What incidents are still open?","intent":"risk_controls"}
+
+{"text":"Hi Mira","intent":"help"}
+{"text":"Hello","intent":"help"}
+{"text":"What can you do?","intent":"help"}
+{"text":"What can I ask you?","intent":"help"}
+{"text":"How can you help me?","intent":"help"}
+{"text":"What finance questions can I ask?","intent":"help"}
+{"text":"Give me some example questions","intent":"help"}
+{"text":"Help","intent":"help"}
+
+{"text":"Which payments are gated?","intent":"pending_approvals"}
+{"text":"Which payments are waiting behind approval gates?","intent":"pending_approvals"}
+{"text":"What payments are blocked pending approval?","intent":"pending_approvals"}
+{"text":"Which payments require a human decision?","intent":"pending_approvals"}
+{"text":"Show me gated payments","intent":"pending_approvals"}
+{"text":"What transactions are waiting on approval?","intent":"pending_approvals"}
+{"text":"Which decisions are gated?","intent":"pending_approvals"}
+{"text":"What payment gates are still open?","intent":"pending_approvals"}
+
+{"text":"What happened with HelixCloud?","intent":"invoice_investigation"}
+{"text":"What happened with this vendor invoice?","intent":"invoice_investigation"}
+{"text":"What happened with the HelixCloud bill?","intent":"invoice_investigation"}
+{"text":"What happened to the HelixCloud invoice?","intent":"invoice_investigation"}
+{"text":"Tell me what happened with HelixCloud","intent":"invoice_investigation"}
+{"text":"What happened with that payment exception?","intent":"invoice_investigation"}
+{"text":"Explain what happened with this invoice","intent":"invoice_investigation"}
+{"text":"What happened with invoice BIO-1400?","intent":"invoice_investigation"}
+
+{"text":"What risks should I know about?","intent":"risk_controls"}
+{"text":"What financial risks should I know about?","intent":"risk_controls"}
+{"text":"What risks are currently open?","intent":"risk_controls"}
+{"text":"What risk issues did Mira identify?","intent":"risk_controls"}
+{"text":"What risk exceptions are active?","intent":"risk_controls"}
+{"text":"Are there any major risks right now?","intent":"risk_controls"}
+{"text":"What control risks need attention?","intent":"risk_controls"}
+{"text":"Tell me about current finance risk","intent":"risk_controls"}
+
+{"text":"What did Mira find?","intent":"finance_review"}
+{"text":"What did Mira find overnight?","intent":"finance_review"}
+{"text":"What did you find overnight?","intent":"finance_review"}
+{"text":"What findings came out of the overnight review?","intent":"finance_review"}
+{"text":"What did the finance review find?","intent":"finance_review"}
+{"text":"What did Mira discover overnight?","intent":"finance_review"}
+{"text":"Summarize what Mira found overnight","intent":"finance_review"}
+{"text":"What did the overnight run find?","intent":"finance_review"}
+
+{"text":"What kinds of things can Mira investigate?","intent":"help"}
+{"text":"What are you capable of?","intent":"help"}
+{"text":"What topics can I ask about?","intent":"help"}
+{"text":"Explain what Mira can do","intent":"help"}
+{"text":"How should I use Ask Mira?","intent":"help"}
+{"text":"Give me examples of questions I can ask","intent":"help"}
+
+{"text":"How much money is available to us right now?","intent":"cash_position"}
+{"text":"How much money do we currently have available?","intent":"cash_position"}
+{"text":"What funds are available right now?","intent":"cash_position"}
+{"text":"How much cash is available today?","intent":"cash_position"}
+{"text":"What money do we have on hand?","intent":"cash_position"}
+
+{"text":"Why was that vendor bill stopped?","intent":"invoice_investigation"}
+{"text":"Why was a supplier bill blocked?","intent":"invoice_investigation"}
+{"text":"Why did we stop that invoice?","intent":"invoice_investigation"}
+{"text":"What caused that vendor bill to be held?","intent":"invoice_investigation"}
+{"text":"Why was that payment invoice flagged?","intent":"invoice_investigation"}
+
+{"text":"What's going on with our AWS costs?","intent":"vendor_spend"}
+{"text":"What changed with AWS spending?","intent":"vendor_spend"}
+{"text":"Tell me what is happening with cloud costs","intent":"vendor_spend"}
+{"text":"What happened to our AWS spend?","intent":"vendor_spend"}
+{"text":"Explain what is going on with AWS costs","intent":"vendor_spend"}
+
+{"text":"What sources did Mira rely on?","intent":"evidence_query"}
+{"text":"What evidence supports Mira's conclusion?","intent":"evidence_query"}
+{"text":"Which evidence was used for this result?","intent":"evidence_query"}
+{"text":"What documents did Mira use?","intent":"evidence_query"}
+{"text":"Show the evidence behind Mira's finding","intent":"evidence_query"}

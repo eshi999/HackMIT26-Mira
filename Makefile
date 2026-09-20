@@ -49,3 +49,38 @@ demo-doctor:
 
 openai-smoke:
 	PYTHONPATH=apps/api:packages $(PYTHON) -m mira.demo openai-smoke
+
+.PHONY: train-intents test-intents
+
+train-intents:
+	PYTHONPATH=packages python3 -m mira.training.train_intent_router
+
+test-intents:
+	PYTHONPATH=packages python3 -m pytest packages/mira/tests/test_intent_router.py -q
+
+
+.PHONY: test-ask-mira-python test-ask-mira-voice check-ask-mira
+
+test-ask-mira-python:
+	PYTHONPATH=packages python3 -m pytest \
+		packages/mira/tests/test_intent_router.py \
+		packages/mira/tests/test_intent_quality.py \
+		packages/mira/tests/test_executive_router_runtime.py \
+		packages/mira/tests/test_data_validation.py \
+		packages/mira/tests/test_mira_web_contract.py \
+		-q
+
+test-ask-mira-voice:
+	PYTHONPATH=apps/api:packages python3 -m pytest \
+		apps/api/tests/test_voice.py \
+		packages/mira/tests/test_deepgram.py \
+		packages/mira/tests/test_elevenlabs.py \
+		-q
+
+check-ask-mira: train-intents test-ask-mira-python test-ask-mira-voice
+	python3 -m py_compile \
+		packages/mira/agents/runtime.py \
+		packages/mira/agents/intent_router.py \
+		packages/mira/training/train_intent_router.py \
+		apps/api/app/routers/voice.py
+	npm run typecheck --prefix apps/web

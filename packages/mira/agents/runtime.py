@@ -601,8 +601,11 @@ def handle_event(
 
 
 def executive_request(session: Session, snapshot: FinanceSnapshot, request: str) -> dict:
-    """Safe interface for voice/skill/other sponsors. Maps prose onto typed work."""
-    text = request.lower()
+    """Learned language routing over deterministic Mira finance tools."""
+
+    from mira.agents.intent_router import predict_intent
+
+    routing = predict_intent(request)
 
     def _money(value) -> str:
         amount = Decimal(value)
@@ -624,93 +627,275 @@ def executive_request(session: Session, snapshot: FinanceSnapshot, request: str)
         company_id=snapshot.company_id,
         workflow_type="executive_request",
         initiated_by=ActorType.USER,
-        plan={"request": request},
+        plan={
+            "request": request,
+            "intent": routing.intent,
+            "intent_confidence": routing.confidence,
+            "intent_model": routing.model_version,
+        },
     )
+
     intake = create_task(
         session,
         run=run,
         destination=AgentRole.MIRA_CFO,
         originating=AgentRole.MIRA_CFO,
-        objective="Translate the executive request into typed specialist work.",
-        input_payload={"request": request},
+        objective="Route an executive request to deterministic finance work.",
+        input_payload={
+            "request": request,
+            "intent": routing.intent,
+            "intent_confidence": routing.confidence,
+        },
     )
-    artifact: dict = {"request": request}
-    if (
-        "month-end" in text
-        or "month end" in text
-        or "blocking" in text
-        or "close status" in text
-        or (("september" in text or "october" in text) and "status" in text)
-        or "close for" in text
-    ):
-        period = parse_close_period(request)
-        status = close_status(session, snapshot.company_id, period) or handle_month_end(
-            session, snapshot, period=period
-        )
-        artifact["kind"] = "close_status"
-        artifact["close"] = status.model_dump(mode="json")
-        artifact["period"] = period
-        completion_pct = float(status.completion_pct) * 100
-        headline = f"{period} close is {completion_pct:.0f}% complete."
 
-        if status.blocked:
+    live = load_snapshot(
+        session,
+        snapshot.company_id,
+        snapshot.as_of,
+    )
+
+    cash = tool_get_cash_position(live)
+
+    artifact: dict = {
+        "request": request,
+        "routing": {
+            "intent": routing.intent,
+            "confidence": round(routing.confidence, 4),
+            "model_version": routing.model_version,
+            "low_confidence": routing.low_confidence,
+        },
+    }
+
+    intent = routing.intent
+
+    if intent == "cash_position":
+        artifact["kind"] = "cash_position"
+        artifact["cash"] = cash.model_dump(mode="json")
+
+        headline = f"Operating cash is {_money(cash.cash.amount)}."
+
+        body = (
+            f"Open AP is {_money(cash.open_ap.amount)} and "
+            f"open AR is {_money(cash.open_ar.amount)} "
+            f"as of {live.as_of}."
+        )
+
+    elif intent == "ap_ar":
+        artifact["kind"] = "ap_ar"
+        artifact["cash"] = cash.model_dump(mode="json")
+
+        headline = (
+            f"Open AP is {_money(cash.open_ap.amount)} and "
+            f"open AR is {_money(cash.open_ar.amount)}."
+        )
+
+        net = Decimal(cash.open_ar.amount) - Decimal(cash.open_ap.amount)
+
+        if net >= 0:
             body = (
-                f"{len(status.completed)} close task"
-                f"{' is' if len(status.completed) == 1 else 's are'} complete, "
-                f"with {len(status.blocked)} still blocked. "
-                "Open the close review for the underlying blockers and evidence."
+                f"Receivables exceed payables by {_money(net)} "
+                "in the current snapshot."
             )
         else:
-            body = "All close tasks are complete and no blockers remain."
-    elif "engineer" in text or "afford" in text:
-        fpna = run_fpna_specialist(snapshot, request)
-        artifact["kind"] = "scenario"
-        artifact["fpna"] = fpna.artifact
-        headline = "Hiring scenario from deterministic cash, AR, AP, and payroll assumptions."
-        body = fpna.explanation
-    elif "aws" in text and any(token in text for token in ("increase", "why", "spend", "variance")):
-        from mira.agents.openai_runtime import run_aws_spend_investigation
+            body = (
+                f"Payables exceed receivables by {_money(abs(net))} "
+                "in the current snapshot."
+            )
 
-        investigation = run_aws_spend_investigation(snapshot, request)
-        artifact["kind"] = "aws_spend_investigation"
-        artifact["investigation"] = investigation
-        headline = investigation["headline"]
-        body = investigation["explanation"]
-    elif "approval" in text or "payment" in text:
+    elif intent == "pending_approvals":
         pending = (
             session.query(Decision)
             .filter(
-                Decision.company_id == snapshot.company_id,
+                Decision.company_id == live.company_id,
                 Decision.requires_human_approval.is_(True),
                 Decision.status.in_({"awaiting_human", "proposed"}),
             )
             .all()
         )
+
         artifact["kind"] = "pending_approvals"
         artifact["pending"] = [
-            {"id": str(d.id), "action": d.action, "risk_level": d.risk_level, "rationale": d.rationale}
+            {
+                "id": str(d.id),
+                "action": d.action,
+                "risk_level": d.risk_level,
+                "rationale": d.rationale,
+            }
             for d in pending
         ]
+
         headline = (
-            f"{len(pending)} item{'s' if len(pending) != 1 else ''} need your review."
-            if pending
-            else "No approvals are waiting."
+            f"{len(pending)} item"
+            f"{'s' if len(pending) != 1 else ''} need your review."
         )
+
         body = (
-            "These items are held behind explicit human-approval controls. "
-            "Mira will not execute a gated payment from this request."
-            if pending
-            else "There are currently no finance decisions waiting on a human approval gate."
+            "These items remain behind explicit human approval gates. "
+            "Mira will not execute a gated payment automatically."
         )
-    else:
-        # Executive questions read the already-computed finance state.
-        # They must not trigger overnight workflows or external integrations.
-        live = load_snapshot(session, snapshot.company_id, snapshot.as_of)
-        metrics = tool_calculate_finance_metrics(live, runtime_only=True)
-        cash = tool_get_cash_position(live)
+
+    elif intent == "close_status":
+        period = parse_close_period(request)
+
+        status = close_status(
+            session,
+            live.company_id,
+            period,
+        )
+
+        artifact["kind"] = "close_status"
+        artifact["period"] = period
+        artifact["close"] = (
+            status.model_dump(mode="json")
+            if status is not None
+            else None
+        )
+
+        if status is None:
+            headline = f"{period} close has not been run yet."
+
+            body = (
+                "The executive request is read-only. "
+                "Run the explicit close workflow to create close state."
+            )
+        else:
+            percent = float(status.completion_pct) * 100
+
+            headline = f"{period} close is {percent:.0f}% complete."
+
+            body = (
+                f"{len(status.completed)} complete and "
+                f"{len(status.blocked)} blocked."
+            )
+
+            if status.blocked:
+                blockers = ", ".join(
+                    item.replace("_", " ")
+                    for item in status.blocked[:3]
+                )
+
+                body += f" Top blockers: {blockers}."
+
+    elif intent == "scenario":
+        fpna = run_fpna_specialist(
+            live,
+            request,
+        )
+
+        artifact["kind"] = "scenario"
+        artifact["fpna"] = fpna.artifact
+
+        headline = (
+            "I ran that scenario against the current finance snapshot."
+        )
+
+        body = fpna.explanation
+
+    elif intent == "vendor_spend":
+        if any(
+            word in request.lower()
+            for word in ("aws", "amazon", "cloud")
+        ):
+            from mira.agents.openai_runtime import (
+                run_aws_spend_investigation,
+            )
+
+            investigation = run_aws_spend_investigation(
+                live,
+                request,
+            )
+
+            artifact["kind"] = "vendor_spend"
+            artifact["investigation"] = investigation
+
+            headline = investigation["headline"]
+            body = investigation["explanation"]
+
+        else:
+            artifact["kind"] = "vendor_spend"
+
+            headline = (
+                "Tell me which vendor or spend category you want investigated."
+            )
+
+            body = (
+                "I can inspect a named vendor, AWS or cloud spend, "
+                "or a specific variance without changing finance state."
+            )
+
+    elif intent in {
+        "invoice_investigation",
+        "evidence_query",
+    }:
+        from mira.agents.tools import tool_retrieve_evidence
+
+        evidence = tool_retrieve_evidence(
+            live,
+            request,
+        )
+
+        if hasattr(evidence, "model_dump"):
+            evidence_payload = evidence.model_dump(mode="json")
+        elif isinstance(evidence, dict):
+            evidence_payload = evidence
+        else:
+            evidence_payload = {
+                "result": str(evidence),
+            }
+
+        artifact["kind"] = intent
+        artifact["evidence"] = evidence_payload
+
+        headline = (
+            "I retrieved the records related to that request."
+        )
+
+        body = (
+            "The underlying result is grounded in Mira's persisted "
+            "evidence and retrieval layer. Open Evidence for the "
+            "full source lineage."
+        )
+
+    elif intent == "risk_controls":
+        from mira.core.models import Incident
+
+        risk = tool_assess_risk(live)
+
+        incidents = (
+            session.query(Incident)
+            .filter(
+                Incident.company_id == live.company_id,
+                Incident.status.in_({
+                    "open",
+                    "investigating",
+                }),
+            )
+            .all()
+        )
+
+        artifact["kind"] = "risk_controls"
+        artifact["risk"] = risk.model_dump(mode="json")
+        artifact["open_incidents"] = len(incidents)
+
+        headline = (
+            f"{len(incidents)} open incident"
+            f"{'s' if len(incidents) != 1 else ''}."
+        )
+
+        body = (
+            f"The deterministic risk engine's highest current "
+            f"risk level is {risk.max_risk_level.value}."
+        )
+
+    elif intent == "finance_review":
+        metrics = tool_calculate_finance_metrics(
+            live,
+            runtime_only=True,
+        )
 
         runtime_savings = [
-            row for row in live.savings
+            row
+            for row in live.savings
             if row.source == "runtime"
         ]
 
@@ -718,50 +903,56 @@ def executive_request(session: Session, snapshot: FinanceSnapshot, request: str)
             (
                 row.amount_usd
                 for row in runtime_savings
-                if row.category in {"duplicate_prevented", "policy_block"}
+                if row.category
+                in {
+                    "duplicate_prevented",
+                    "policy_block",
+                }
             ),
             Decimal("0.00"),
         )
 
         hours_returned = sum(
-            (row.hours_saved for row in runtime_savings),
+            (
+                row.hours_saved
+                for row in runtime_savings
+            ),
             Decimal("0.00"),
         )
 
         pending_count = (
             session.query(Decision)
             .filter(
-                Decision.company_id == snapshot.company_id,
+                Decision.company_id == live.company_id,
                 Decision.requires_human_approval.is_(True),
-                Decision.status.in_({"awaiting_human", "proposed"}),
+                Decision.status.in_({
+                    "awaiting_human",
+                    "proposed",
+                }),
             )
             .count()
         )
 
         artifact["kind"] = "finance_review"
-        artifact["overnight"] = {
-            "read_only": True,
-            "source": "persisted_runtime_state",
-        }
-        artifact["metrics"] = metrics.model_dump(mode="json")
-        artifact["cash"] = cash.model_dump(mode="json")
+        artifact["metrics"] = metrics.model_dump(
+            mode="json",
+        )
+        artifact["cash"] = cash.model_dump(
+            mode="json",
+        )
         artifact["dollars_protected"] = str(protected)
         artifact["hours_returned"] = str(hours_returned)
         artifact["pending_approvals"] = pending_count
+        artifact["read_only"] = True
 
         headline = "Overnight finance review is complete."
 
-        attention = (
-            f"{pending_count} items still need your review."
-            if pending_count
-            else "No human approvals are waiting."
-        )
-
         impact = ""
+
         if protected > 0 or hours_returned > 0:
             impact = (
-                f"Mira protected {_money(protected)} and returned "
-                f"{hours_returned:.1f} hours. "
+                f"Mira protected {_money(protected)} "
+                f"and returned {hours_returned:.1f} hours. "
             )
 
         body = (
@@ -769,11 +960,35 @@ def executive_request(session: Session, snapshot: FinanceSnapshot, request: str)
             f"Operating cash is {_money(cash.cash.amount)}, "
             f"with {_money(cash.open_ap.amount)} in open AP "
             f"and {_money(cash.open_ar.amount)} in open AR. "
-            f"{attention}"
+            f"{pending_count} items still need your review."
         )
-    live = load_snapshot(session, snapshot.company_id, snapshot.as_of)
-    cash = tool_get_cash_position(live)
+
+    elif intent == "help":
+        artifact["kind"] = "help"
+
+        headline = "Ask me about the finance operation."
+
+        body = (
+            "I can answer questions about cash, AP and AR, "
+            "approvals, month-end close, invoices, vendor spend, "
+            "risk controls, evidence, and hiring scenarios."
+        )
+
+    else:
+        artifact["kind"] = "unknown"
+
+        headline = (
+            "I need a little more specificity to ground that request."
+        )
+
+        body = (
+            "Try asking about cash, AP or AR, approvals, "
+            "close, an invoice, vendor spend, risk controls, "
+            "evidence, or a hiring scenario."
+        )
+
     risk = tool_assess_risk(live)
+
     complete_task(
         session,
         intake,
@@ -783,27 +998,42 @@ def executive_request(session: Session, snapshot: FinanceSnapshot, request: str)
         confidence_score=cash.confidence.score,
         risk_level=risk.max_risk_level.value,
     )
-    rec = CFORecommendation(
+
+    recommendation = CFORecommendation(
         headline=headline,
         body=body,
-        action=artifact.get("kind", "review"),
+        action=artifact.get(
+            "kind",
+            "review",
+        ),
         priority="action",
         confidence=cash.confidence,
         risk_level=risk.max_risk_level,
-        policy_basis="Executive request API maps onto typed tasks; it does not execute live payments.",
+        policy_basis=(
+            "A trained intent model selects a bounded finance "
+            "workflow. Financial facts remain deterministic."
+        ),
         authority_basis=mira_authority(),
         evidence=[],
         requires_human_approval=False,
     )
-    finish_run(session, run, AgentRunStatus.COMPLETED)
+
+    finish_run(
+        session,
+        run,
+        AgentRunStatus.COMPLETED,
+    )
+
     return {
         "run_id": str(run.id),
         "request": request,
         "kind": artifact.get("kind"),
-        "recommendation": rec.model_dump(mode="json"),
+        "routing": artifact["routing"],
+        "recommendation": recommendation.model_dump(
+            mode="json",
+        ),
         "artifact": artifact,
     }
-
 
 def mira_authority():
     from mira.core.agent_outputs import AuthorityBasis
