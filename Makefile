@@ -1,4 +1,4 @@
-.PHONY: install test typecheck api web seed migrate lint eval
+.PHONY: install test typecheck api web seed migrate lint eval token-eval
 
 PYTHON ?= .venv/bin/python
 PIP ?= .venv/bin/pip
@@ -36,3 +36,6 @@ lint:
 
 eval:
 	PYTHONPATH=packages $(PYTHON) -m mira.evaluation
+
+token-eval:
+	PYTHONPATH=packages $(PYTHON) -m mira.context.evaluation
