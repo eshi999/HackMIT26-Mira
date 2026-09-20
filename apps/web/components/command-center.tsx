@@ -75,15 +75,85 @@ export function CommandCenter() {
               </div>
             </div>
             <div>
+              <div className="text-[11px] uppercase tracking-[0.18em] text-mute">Dollars saved</div>
+              <div className="font-serif text-3xl text-ivory">
+                {usd(briefing.savings.dollars_saved ?? 0)}
+              </div>
+            </div>
+            <div>
               <div className="text-[11px] uppercase tracking-[0.18em] text-mute">Hours returned</div>
               <div className="font-serif text-3xl text-ivory">
                 {hours(briefing.savings.hours_saved)}
               </div>
             </div>
-            <div className="text-xs text-mute">From SavingsEvent rows · {briefing.savings.period}</div>
+            <div className="text-xs text-mute">
+              Workflow SavingsEvent rows · {briefing.savings.source ?? "runtime"} · {briefing.savings.period}
+            </div>
           </CardContent>
         </Card>
       </section>
+
+      <section className="grid gap-4 md:grid-cols-4">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm text-mute">Autonomous completion</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="font-serif text-3xl">
+              {Number(briefing.autonomous_completion_rate ?? 0).toFixed(0)}
+            </div>
+            <p className="mt-1 text-xs text-mute">Autonomy score from the evaluation engine, 0–100.</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm text-mute">Reconciliation rate</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="font-serif text-3xl">
+              {(Number(briefing.reconciliation_rate ?? 0) * 100).toFixed(0)}%
+            </div>
+            <p className="mt-1 text-xs text-mute">Bank feed matched without forced pairing.</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm text-mute">Open incidents</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="font-serif text-3xl">{briefing.open_incidents ?? 0}</div>
+            <p className="mt-1 text-xs text-mute">Risk-engine incidents still open.</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm text-mute">Gates</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="font-serif text-3xl">{briefing.pending_approvals ?? needsYou.length}</div>
+            <p className="mt-1 text-xs text-mute">
+              Pending approvals · {briefing.blocked_payments ?? 0} blocked payments
+            </p>
+          </CardContent>
+        </Card>
+      </section>
+
+      {briefing.close ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm text-mute">September close</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="font-serif text-3xl">
+              {(Number(briefing.close.completion_pct) * 100).toFixed(0)}%
+            </div>
+            <p className="mt-1 text-xs text-mute">
+              {briefing.close.completed.length} complete · {briefing.close.blocked.length} blocked · audit{" "}
+              {briefing.close.audit_status}
+            </p>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <section className="grid gap-4 md:grid-cols-3">
         <Card>

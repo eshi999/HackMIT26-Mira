@@ -65,6 +65,59 @@ def match_invoice(snapshot: FinanceSnapshot, invoice_id: UUID) -> ThreeWayMatchR
     policy = evaluate_invoice(snapshot, invoice.id)
     violated = policy.violated_policy_ids if policy else ()
 
+    def _result(status: MatchStatus, *, score: Decimal, basis: str, explanation: str, **extra) -> ThreeWayMatchResult:
+        return ThreeWayMatchResult(
+            invoice_id=invoice.id,
+            po_id=po.id if po else None,
+            receipt_ids=tuple(row.id for row in receipts) if po else (),
+            status=status,
+            invoice_total=_money(invoice.total, currency),
+            duplicate_invoice_ids=duplicates,
+            violated_policy_ids=violated,
+            confidence=Confidence(score=score, basis=basis),
+            evidence=evidence,
+            explanation=explanation,
+            **extra,
+        )
+
+    if invoice.lines:
+        line_sum = sum(
+            (_line_amount(line.quantity, line.unit_price, line.amount) for line in invoice.lines),
+            Decimal("0"),
+        )
+        line_sum = quantize_money(line_sum)
+        tax = quantize_money(invoice.tax_total)
+        allowed = {
+            quantize_money(invoice.total),
+            quantize_money(invoice.subtotal),
+            quantize_money(invoice.subtotal + tax),
+        }
+        if line_sum not in allowed:
+            return _result(
+                MatchStatus.INVALID_ARITHMETIC,
+                score=Decimal("0.99"),
+                basis="Invoice header total does not equal the sum of line items.",
+                explanation=(
+                    f"INVALID_ARITHMETIC: header {invoice.total} vs line-item sum {line_sum} "
+                    f"(subtotal {invoice.subtotal}, tax {tax}). Payment is forbidden."
+                ),
+            )
+    elif invoice.direction == "ap":
+        return _result(
+            MatchStatus.MISSING_EVIDENCE,
+            score=Decimal("0.99"),
+            basis="AP invoice has no line items; arithmetic cannot be verified.",
+            explanation="MISSING_EVIDENCE: invoice lines are required before a pay recommendation.",
+        )
+
+    if invoice.direction == "ap" and invoice.document_id is None:
+        return _result(
+            MatchStatus.MISSING_EVIDENCE,
+            score=Decimal("0.99"),
+            basis="Required source document_id is null; evidence is missing, not inferred.",
+            explanation="MISSING_EVIDENCE: no source document is attached to this invoice.",
+        )
+
     if po is None:
         return ThreeWayMatchResult(
             invoice_id=invoice.id,
@@ -105,16 +158,32 @@ def match_invoice(snapshot: FinanceSnapshot, invoice_id: UUID) -> ThreeWayMatchR
                 )
             )
             po_price_by_line = {line.id: line.unit_price or Decimal("0") for line in po.lines}
-            if receipt.lines:
-                for line in receipt.lines:
-                    price = po_price_by_line.get(line.purchase_order_line_id or UUID(int=0), None)
-                    if price is None:
-                        # Fall back to PO total / PO qty so a header-only receipt still values.
-                        po_qty = sum((pl.quantity for pl in po.lines), Decimal("0")) or Decimal("1")
-                        price = po.total / po_qty
-                    received_amount += line.quantity * price
-            else:
-                received_amount += po.total
+            if not receipt.lines:
+                return ThreeWayMatchResult(
+                    invoice_id=invoice.id,
+                    po_id=po.id,
+                    receipt_ids=receipt_ids,
+                    status=MatchStatus.MISSING_EVIDENCE,
+                    invoice_total=_money(invoice.total, currency),
+                    po_total=_money(po.total, currency),
+                    duplicate_invoice_ids=duplicates,
+                    violated_policy_ids=violated,
+                    confidence=Confidence(
+                        score=Decimal("0.99"),
+                        basis="Goods receipt exists but has no quantity lines; coverage is missing.",
+                    ),
+                    evidence=evidence,
+                    explanation=(
+                        f"MISSING_EVIDENCE: receipt {receipt.id} has no lines. "
+                        "Empty receipts do not cover the PO."
+                    ),
+                )
+            for line in receipt.lines:
+                price = po_price_by_line.get(line.purchase_order_line_id or UUID(int=0), None)
+                if price is None:
+                    po_qty = sum((pl.quantity for pl in po.lines), Decimal("0")) or Decimal("1")
+                    price = po.total / po_qty
+                received_amount += line.quantity * price
         received_amount = quantize_money(received_amount)
     else:
         return ThreeWayMatchResult(
@@ -140,7 +209,26 @@ def match_invoice(snapshot: FinanceSnapshot, invoice_id: UUID) -> ThreeWayMatchR
     po_qty = sum((line.quantity for line in po.lines), Decimal("0"))
     received_qty = sum((line.quantity for rec in receipts for line in rec.lines), Decimal("0"))
 
-    if vendor_mismatch or invoice.total > po.total or (received_qty and billed_qty > received_qty):
+    if received_qty <= 0:
+        return ThreeWayMatchResult(
+            invoice_id=invoice.id,
+            po_id=po.id,
+            receipt_ids=receipt_ids,
+            status=MatchStatus.MISSING_EVIDENCE,
+            invoice_total=_money(invoice.total, currency),
+            po_total=_money(po.total, currency),
+            received_amount=_money(received_amount, currency),
+            duplicate_invoice_ids=duplicates,
+            violated_policy_ids=violated,
+            confidence=Confidence(
+                score=Decimal("0.99"),
+                basis="Receipt quantity coverage is zero; match cannot be claimed.",
+            ),
+            evidence=evidence,
+            explanation="MISSING_EVIDENCE: goods receipt quantity coverage is zero.",
+        )
+
+    if vendor_mismatch or invoice.total > po.total or billed_qty > received_qty:
         status = MatchStatus.MISMATCH
         basis = "Invoice amount or quantity exceeds PO/receipt on complete numeric fields."
         score = Decimal("0.99")
@@ -153,7 +241,7 @@ def match_invoice(snapshot: FinanceSnapshot, invoice_id: UUID) -> ThreeWayMatchR
         basis = "Amounts differ within the 2% partial window on complete documents."
         score = Decimal("0.90")
         explanation = f"PARTIAL_MATCH: invoice {invoice.total} vs PO {po.total} within 2%."
-    elif invoice.total != po.total or (received_qty and billed_qty != received_qty):
+    elif invoice.total != po.total or billed_qty != received_qty:
         status = MatchStatus.PARTIAL_MATCH
         basis = "Documents exist but quantities or amounts are not identical."
         score = Decimal("0.88")

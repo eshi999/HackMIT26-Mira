@@ -85,6 +85,35 @@ def test_aws_precedent_carveout_under_12k() -> None:
     assert POL_SPEND_CFO_10K in over.violated_policy_ids
 
 
+def test_aws_without_precedent_still_hits_spend_threshold() -> None:
+    snapshot = FinanceSnapshot(
+        company_id=uuid4(),
+        as_of=date(2026, 9, 19),
+        policies=(
+            PolicyView(
+                id=uuid4(),
+                name="spend",
+                policy_type="spend",
+                version="3",
+                body="",
+                rules={"cfo_approval_above": 10000, "aws_precedent_limit": 12000},
+                status="active",
+            ),
+        ),
+    )
+    result = evaluate_subject(
+        snapshot,
+        PolicySubject(
+            subject_type="invoice",
+            subject_id=uuid4(),
+            amount=Decimal("11000.00"),
+            vendor_name="Amazon Web Services",
+            as_of=date(2026, 9, 19),
+        ),
+    )
+    assert POL_SPEND_CFO_10K in result.violated_policy_ids
+
+
 def test_self_approve_and_new_vendor_policy() -> None:
     requester = uuid4()
     snapshot = FinanceSnapshot(

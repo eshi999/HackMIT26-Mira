@@ -72,8 +72,10 @@ export type Briefing = {
   open_ap: number | string;
   savings: {
     dollars_protected: number | string;
+    dollars_saved?: number | string;
     hours_saved: number | string;
     period: string;
+    source?: string;
   };
   pending_decisions: DecisionBrief[];
   findings: FindingBrief[];
@@ -82,6 +84,18 @@ export type Briefing = {
   documents_ingested: number;
   inbox: DocumentBrief[];
   sandbox_notice: string;
+  autonomous_completion_rate?: number | string;
+  reconciliation_rate?: number | string;
+  open_incidents?: number;
+  blocked_payments?: number;
+  pending_approvals?: number;
+  close?: {
+    period: string;
+    completion_pct: number | string;
+    completed: string[];
+    blocked: string[];
+    audit_status: string;
+  } | null;
 };
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -91,6 +105,29 @@ export async function fetchBriefing(): Promise<Briefing | null> {
     const res = await fetch(`${API}/api/v1/briefing`, { cache: "no-store" });
     if (!res.ok) return null;
     return (await res.json()) as Briefing;
+  } catch {
+    return null;
+  }
+}
+
+export async function resolveDecision(
+  decisionId: string,
+  resolution: "approve" | "reject",
+  comment?: string,
+): Promise<Record<string, unknown> | null> {
+  const token = process.env.NEXT_PUBLIC_MIRA_DEMO_TOKEN ?? "mira-demo-elena";
+  try {
+    const res = await fetch(`${API}/api/v1/decisions/${decisionId}/resolve`, {
+      method: "POST",
+      cache: "no-store",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ resolution, comment: comment ?? null }),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as Record<string, unknown>;
   } catch {
     return null;
   }

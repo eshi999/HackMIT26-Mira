@@ -4,7 +4,7 @@ Mira is an autonomous digital CFO: one AI employee the company hires, with an in
 
 Central question: **how much of the Office of the CFO can one autonomous AI employee actually run?**
 
-This document is the contract for the 24-hour HackMIT 2026 build. Agents are specified here and **not implemented in this slice**. Domain models, adapters, the command-center UI, and a seeded company (Northstar Labs) come first.
+This slice shipped domain models, adapters, the command-center UI, the seeded company (Northstar Labs), Phase 2 deterministic engines, and **Phase 3 Mira runtime + specialists**. Integrations remain adapters: missing credentials degrade to demo mode.
 
 ---
 
@@ -248,7 +248,7 @@ Seeded in `packages/mira/seed/northstar.py`. Series B lab company, messy AP inbo
 | 1 | Monorepo, models, migrations, health, seed, boot tests | **this PR** |
 | 2 | Command center UI on seeded data | **this PR** (shell) |
 | 3 | Deterministic engines: policy, duplicate, 3-way, risk, savings, recon, contracts, public data, Elastic projection | **this PR (phase 2)** |
-| 4 | Mira runtime + specialist agents (OpenAI Agents SDK) | next — **do not start here** |
+| 4 | Mira runtime + specialist agents (OpenAI Agents SDK) | **this PR (phase 3)** |
 | 5 | Procurement path (Visa sandbox) | next |
 | 6 | Dropbox ingest + textual analysis | next |
 | 7 | Elastic evidence index | next |

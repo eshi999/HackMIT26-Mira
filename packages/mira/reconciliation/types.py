@@ -51,6 +51,7 @@ class ReconMatch(BaseModel):
     evidence: list[EvidenceReference] = Field(default_factory=list)
     explanation: str
     forced: bool = False
+    economic_kind: str | None = None
 
 
 class ReconciliationReport(BaseModel):

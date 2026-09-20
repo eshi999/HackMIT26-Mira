@@ -3,10 +3,11 @@ from __future__ import annotations
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.deps import get_db
+from mira.agents.runtime import command_center_briefing_data
 from mira.core.models import (
     Company,
     Decision,
@@ -14,13 +15,12 @@ from mira.core.models import (
     ExternalSignal,
     Finding,
     Invoice,
-    Metric,
-    SavingsEvent,
     Vendor,
 )
 from mira.core.schemas import (
     BriefingOut,
     CashPosition,
+    CloseBrief,
     CompanyOut,
     DecisionBrief,
     DocumentBrief,
@@ -29,6 +29,8 @@ from mira.core.schemas import (
     SavingsTotals,
     SignalOut,
 )
+from mira.finance.snapshot import load_snapshot
+from mira.seed.northstar import AS_OF
 
 router = APIRouter(prefix="/api/v1", tags=["company"])
 
@@ -49,28 +51,12 @@ def get_company(db: Session = Depends(get_db)) -> Company:
 def get_briefing(db: Session = Depends(get_db)) -> BriefingOut:
     company = _require_northstar(db)
     cid = company.id
-
-    cash_row = db.scalar(
-        select(Metric).where(Metric.company_id == cid, Metric.name == "cash")
-    )
-    ap_row = db.scalar(
-        select(Metric).where(Metric.company_id == cid, Metric.name == "open_ap")
-    )
-    dollars = db.scalar(
-        select(func.coalesce(func.sum(SavingsEvent.amount_usd), 0)).where(
-            SavingsEvent.company_id == cid
-        )
-    )
-    hours = db.scalar(
-        select(func.coalesce(func.sum(SavingsEvent.hours_saved), 0)).where(
-            SavingsEvent.company_id == cid
-        )
-    )
+    snapshot = load_snapshot(db, cid, AS_OF.date())
+    runtime = command_center_briefing_data(db, snapshot)
+    db.commit()
 
     decisions = db.scalars(
-        select(Decision)
-        .where(Decision.company_id == cid)
-        .order_by(Decision.created_at.desc())
+        select(Decision).where(Decision.company_id == cid).order_by(Decision.created_at.desc())
     ).all()
     findings = db.scalars(
         select(Finding).where(Finding.company_id == cid).order_by(Finding.severity.desc())
@@ -80,33 +66,23 @@ def get_briefing(db: Session = Depends(get_db)) -> BriefingOut:
     signals = db.scalars(select(ExternalSignal).where(ExternalSignal.company_id == cid)).all()
     documents = db.scalars(select(Document).where(Document.company_id == cid)).all()
 
-    pending = [d for d in decisions if d.requires_human_approval]
-    headline = (
-        "I blocked a duplicate HelixCloud bill and I need you on a GPU purchase."
-        if pending
-        else "Northstar is quiet. I will keep watching AP and cash."
-    )
-    narrative = (
-        "Elena, I closed the Dropbox-shaped inbox overnight. "
-        "Eleven documents are classified. HelixCloud 10441-A is a duplicate of 10441 — "
-        "I blocked $18,400 under spend policy v3 clause 6. Apex Scientific is 38 days overdue. "
-        "The $67,000 eval-cluster GPU request clears budget but not authority; dual approval "
-        "is waiting. Any Visa path from here is SANDBOX / simulated, not a live transfer."
-    )
-
+    close = runtime.get("close")
+    cash = runtime["cash"]
     return BriefingOut(
         company=CompanyOut.model_validate(company),
-        headline=headline,
-        narrative=narrative,
+        headline=runtime["headline"],
+        narrative=runtime["narrative"],
         cash=CashPosition(
-            amount=Decimal(cash_row.value) if cash_row else Decimal("0"),
+            amount=cash.cash.amount,
             account_name="Operating cash",
         ),
-        open_ap=Decimal(ap_row.value) if ap_row else Decimal("0"),
+        open_ap=cash.open_ap.amount,
         savings=SavingsTotals(
-            dollars_protected=Decimal(dollars or 0),
-            hours_saved=Decimal(hours or 0),
+            dollars_protected=Decimal(runtime["dollars_protected"]),
+            dollars_saved=Decimal(runtime["dollars_saved"]),
+            hours_saved=Decimal(runtime["hours_saved"]),
             period="2026-09",
+            source="runtime",
         ),
         pending_decisions=[
             DecisionBrief(
@@ -173,4 +149,10 @@ def get_briefing(db: Session = Depends(get_db)) -> BriefingOut:
             )
             for d in documents
         ],
+        autonomous_completion_rate=Decimal(runtime["autonomous_completion_rate"]),
+        reconciliation_rate=Decimal(runtime["reconciliation_rate"]),
+        open_incidents=int(runtime["open_incidents"]),
+        blocked_payments=int(runtime["blocked_payments"]),
+        pending_approvals=int(runtime["pending_approvals"]),
+        close=CloseBrief.model_validate(close) if close else None,
     )

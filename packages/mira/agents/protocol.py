@@ -1,4 +1,4 @@
-"""Protocols for Mira and specialist agents. No runtime."""
+"""Protocols and org chart for Mira and specialist agents."""
 
 from __future__ import annotations
 
@@ -25,18 +25,29 @@ MIRA_ORG: tuple[SpecialistSpec, ...] = (
         role=AgentRole.MIRA_CFO,
         title="Digital CFO",
         reports_to=AgentRole.MIRA_CFO,
-        tools=("plan", "review", "escalate", "recommend"),
+        tools=("plan", "review", "escalate", "recommend", "delegate"),
         speaks_to_user=True,
     ),
     SpecialistSpec(
         role=AgentRole.ACCOUNTS_PAYABLE,
-        title="AP specialist",
-        tools=("extract_invoice", "detect_duplicates"),
+        title="AP / AR specialist",
+        tools=(
+            "evaluate_invoice",
+            "three_way_match",
+            "detect_duplicates",
+            "evaluate_policy",
+            "get_ar_aging",
+        ),
     ),
     SpecialistSpec(
         role=AgentRole.TREASURY,
         title="Treasury specialist",
-        tools=("cash_position", "read_public_signals"),
+        tools=("get_cash_position", "reconcile_transaction", "reconcile_period"),
+    ),
+    SpecialistSpec(
+        role=AgentRole.CONTROLLER,
+        title="Controller specialist",
+        tools=("get_company_context", "retrieve_evidence", "evaluate_policy"),
     ),
     SpecialistSpec(
         role=AgentRole.PROCUREMENT,
@@ -46,12 +57,12 @@ MIRA_ORG: tuple[SpecialistSpec, ...] = (
     SpecialistSpec(
         role=AgentRole.AUDIT,
         title="Audit specialist",
-        tools=("policy_cite", "control_test"),
+        tools=("policy_cite", "control_test", "evaluate_policy", "assess_risk", "retrieve_evidence"),
     ),
     SpecialistSpec(
         role=AgentRole.FPNA,
         title="FP&A specialist",
-        tools=("forecast", "runway"),
+        tools=("forecast", "runway", "calculate_finance_metrics", "obtain_public_signal"),
     ),
     SpecialistSpec(
         role=AgentRole.POLICY,
@@ -70,5 +81,5 @@ class Agent(Protocol):
     role: AgentRole
 
     def run(self, payload: dict) -> AgentTaskResult:
-        """Return a typed result. Implementations belong in a later slice."""
+        """Return a typed result from tools. The LLM must not invent the payload."""
         ...

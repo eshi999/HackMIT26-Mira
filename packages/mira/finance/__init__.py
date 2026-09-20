@@ -1,6 +1,7 @@
 """Deterministic money, COA, aging, spend, contract comparison. No LLM arithmetic."""
 
 from mira.finance.aging import ar_overdue, days_overdue
+from mira.finance.cash import CashPositionResult, get_cash_position
 from mira.finance.contracts import (
     ContractFacts,
     ContractInvoiceComparison,
@@ -18,4 +19,6 @@ __all__ = [
     "facts_from_extracted",
     "days_overdue",
     "ar_overdue",
+    "CashPositionResult",
+    "get_cash_position",
 ]

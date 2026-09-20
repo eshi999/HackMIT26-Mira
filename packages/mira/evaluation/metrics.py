@@ -28,6 +28,11 @@ class FinanceMetrics(BaseModel):
     reconciliation_rate: Decimal
     decision_accuracy: Decimal
     autonomy_score: Decimal
+    autonomous_completion_rate: Decimal = Decimal("0.00")
+    false_escalation_rate: Decimal = Decimal("0.00")
+    correct_escalation_rate: Decimal = Decimal("0.00")
+    evidence_completeness: Decimal = Decimal("0.00")
+    human_interventions: Decimal = Decimal("0.00")
     engine_version: str = ENGINE_VERSION
 
 
@@ -86,19 +91,32 @@ def compute_metrics(
     hours = sum((row.hours_saved for row in snapshot.savings), Decimal("0.00"))
 
     decisions = snapshot.decisions
-    completed = Decimal(len([d for d in decisions if d.status in {"executed", "approved", "rejected"}]))
+    auto_done = {"evaluated", "proposed", "executed"}
+    completed_statuses = auto_done | {"approved", "rejected"}
+    completed = Decimal(len([d for d in decisions if d.status in completed_statuses]))
     auto_completed = Decimal(
-        len([d for d in decisions if d.status == "executed" and not d.requires_human_approval])
+        len([d for d in decisions if d.status in auto_done and not d.requires_human_approval])
     )
     escalated = Decimal(len([d for d in decisions if d.requires_human_approval]))
-    # Completed count should include still-open escalations that represent finished engine work.
     tasks_completed = Decimal(len(decisions)) if decisions else completed
+    human_interventions = escalated
 
     recon_rate = recon.reconciliation_rate if recon is not None else Decimal("0.00")
     accuracy = decision_accuracy
     if accuracy is None:
-        # Default: seeded decisions are the labeled set; accuracy is 1.00 until eval overrides.
         accuracy = Decimal("1.00") if decisions else Decimal("0.00")
+
+    auto_rate = _ratio(auto_completed, tasks_completed) if tasks_completed else Decimal("0.00")
+    false_rate = _ratio(false_escalations, escalated) if escalated else Decimal("0.00")
+    correct_rate = (Decimal("1.00") - false_rate) if escalated else Decimal("0.00")
+    evidence_completeness = (
+        _ratio(
+            Decimal(len([d for d in decisions if d.subject_id is not None])),
+            Decimal(len(decisions)),
+        )
+        if decisions
+        else Decimal("0.00")
+    )
 
     score = autonomy_score(
         reconciliation_rate=recon_rate,
@@ -120,4 +138,9 @@ def compute_metrics(
         reconciliation_rate=recon_rate,
         decision_accuracy=accuracy,
         autonomy_score=score,
+        autonomous_completion_rate=auto_rate,
+        false_escalation_rate=false_rate,
+        correct_escalation_rate=correct_rate,
+        evidence_completeness=evidence_completeness,
+        human_interventions=human_interventions,
     )

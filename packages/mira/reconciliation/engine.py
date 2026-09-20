@@ -38,13 +38,46 @@ def _party_compatible(txn: TransactionView, invoice: InvoiceView) -> bool:
     return False
 
 
-def _abs_amount(txn: TransactionView) -> Decimal:
-    return quantize_money(txn.amount.copy_abs())
-
-
 def _is_refund(txn: TransactionView) -> bool:
     blob = f"{txn.description} {txn.external_ref or ''}".upper()
-    return "REFUND" in blob or "CHARGEBACK" in blob or txn.amount > 0 and "CREDIT" in blob
+    return "REFUND" in blob or "CHARGEBACK" in blob or (txn.amount > 0 and "CREDIT" in blob)
+
+
+def _is_chargeback(txn: TransactionView) -> bool:
+    blob = f"{txn.description} {txn.external_ref or ''}".upper()
+    return "CHARGEBACK" in blob
+
+
+def economic_kind(txn: TransactionView, invoice: InvoiceView) -> str | None:
+    """Classify the economic meaning of pairing a bank txn with an invoice.
+
+    Never use absolute amount alone. Currency and direction must agree.
+    """
+    if txn.currency != invoice.currency:
+        return None
+    if _is_refund(txn):
+        if txn.amount > 0 and invoice.direction == "ap":
+            return "chargeback" if _is_chargeback(txn) else "refund"
+        if txn.amount < 0 and invoice.direction == "ar":
+            return "chargeback" if _is_chargeback(txn) else "refund"
+        return None
+    if txn.amount < 0 and invoice.direction == "ap":
+        return "ap_payment"
+    if txn.amount > 0 and invoice.direction == "ar":
+        return "ar_receipt"
+    return None
+
+
+def _payment_compatible(txn: TransactionView, invoice: InvoiceView) -> bool:
+    return economic_kind(txn, invoice) in {"ap_payment", "ar_receipt"} and _party_compatible(txn, invoice)
+
+
+def _refund_compatible(txn: TransactionView, invoice: InvoiceView) -> bool:
+    return economic_kind(txn, invoice) in {"refund", "chargeback"} and _party_compatible(txn, invoice)
+
+
+def _abs_amount(txn: TransactionView) -> Decimal:
+    return quantize_money(txn.amount.copy_abs())
 
 
 def _txn_evidence(txn: TransactionView) -> EvidenceReference:
@@ -77,6 +110,7 @@ def _match(
     explanation: str,
 ) -> ReconMatch:
     invoices = tuple(invoices)
+    kind = economic_kind(txn, invoices[0]) if invoices else None
     return ReconMatch(
         transaction_id=txn.id,
         counterpart_ids=tuple(inv.id for inv in invoices),
@@ -87,6 +121,7 @@ def _match(
         evidence=[_txn_evidence(txn), *(_inv_evidence(inv) for inv in invoices)],
         explanation=explanation,
         forced=False,
+        economic_kind=kind,
     )
 
 
@@ -126,7 +161,7 @@ def reconcile(snapshot: FinanceSnapshot) -> ReconciliationReport:
         candidates = [
             inv
             for inv in open_invoices()
-            if inv.total == amt and _party_compatible(txn, inv)
+            if inv.total == amt and _payment_compatible(txn, inv)
         ]
         exact = [
             inv
@@ -161,7 +196,9 @@ def reconcile(snapshot: FinanceSnapshot) -> ReconciliationReport:
         hits = [
             inv
             for inv in open_invoices()
-            if normalize_reference(inv.invoice_number) and (
+            if _payment_compatible(txn, inv)
+            and normalize_reference(inv.invoice_number)
+            and (
                 normalize_reference(inv.invoice_number) in ref
                 or ref in normalize_reference(inv.invoice_number)
                 or normalize_reference(inv.invoice_number) in desc
@@ -189,7 +226,7 @@ def reconcile(snapshot: FinanceSnapshot) -> ReconciliationReport:
         amt = _abs_amount(txn)
         hits = []
         for inv in open_invoices():
-            if not _party_compatible(txn, inv):
+            if not _payment_compatible(txn, inv):
                 continue
             if abs(inv.total - amt) > FUZZY_AMOUNT:
                 continue
@@ -221,7 +258,7 @@ def reconcile(snapshot: FinanceSnapshot) -> ReconciliationReport:
         pool = [
             inv
             for inv in open_invoices()
-            if (txn.vendor_id is None or inv.vendor_id == txn.vendor_id)
+            if _payment_compatible(txn, inv)
             and inv.direction == "ap"
             and inv.total <= amt
         ]
@@ -262,7 +299,7 @@ def reconcile(snapshot: FinanceSnapshot) -> ReconciliationReport:
             delta = abs(inv.total - amt)
             pct = abs(inv.total * CARD_FEE_PCT - delta)
             if delta in KNOWN_FEES or pct <= Decimal("0.05"):
-                if not _party_compatible(txn, inv):
+                if not _payment_compatible(txn, inv):
                     continue
                 hits.append(inv)
         if len(hits) == 1:
@@ -286,17 +323,7 @@ def reconcile(snapshot: FinanceSnapshot) -> ReconciliationReport:
         if txn.id in used_tx or not _is_refund(txn):
             continue
         amt = _abs_amount(txn)
-        hits = [
-            inv
-            for inv in open_invoices()
-            if inv.total == amt
-            and (
-                "refund" in inv.invoice_number.lower()
-                or "cr" in inv.invoice_number.lower()
-                or inv.status in {"void", "rejected"}
-                or (txn.vendor_id and inv.vendor_id == txn.vendor_id)
-            )
-        ]
+        hits = [inv for inv in open_invoices() if inv.total == amt and _refund_compatible(txn, inv)]
         if len(hits) == 1:
             used_tx.add(txn.id)
             used_inv.add(hits[0].id)
